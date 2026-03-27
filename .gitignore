@@ -1,0 +1,21 @@
+## .NET
+bin/
+obj/
+dist/
+*.user
+*.suo
+.vs/
+TestResults/
+
+## Secrets — NEVER commit
+**/connections.json
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## IDE
+.idea/
+.vscode/
+*.DotSettings.user

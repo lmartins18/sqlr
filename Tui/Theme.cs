@@ -99,11 +99,11 @@ public static class Theme
 
     public static ColorScheme EvenRow => new()
     {
-        Normal    = new TAttr(Color.White,        Color.DarkGray),
+        Normal    = new TAttr(Color.White,        Color.Blue),
         Focus     = new TAttr(Color.Black,        Color.Cyan),
-        HotNormal = new TAttr(Color.Yellow,       Color.DarkGray),
+        HotNormal = new TAttr(Color.Yellow,       Color.Blue),
         HotFocus  = new TAttr(Color.Yellow,       Color.Cyan),
-        Disabled  = new TAttr(Color.Gray,         Color.DarkGray)
+        Disabled  = new TAttr(Color.Gray,         Color.Blue)
     };
 
     // ── Helper: apply rounded border to any View ───────────────────────────

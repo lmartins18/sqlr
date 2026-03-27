@@ -13,11 +13,13 @@ public static class QueryScreen
     private static bool             _suppressCompletion;
     private static int              _popupSelectedIndex;
     private static List<Completion> _popupItems = [];
+    private static DataTable?       _currentTable;
 
     public static void Run(SqlrConnection conn, SqlRunner runner, DatabaseSchema schema)
     {
         _lastRowCount  = 0;
         _lastElapsedMs = 0;
+        _currentTable  = null;
 
         var completer = new SqlCompleter(schema);
 
@@ -54,6 +56,7 @@ public static class QueryScreen
         };
         ConfigureTableStyle(tableView);
         resultsFrame.Add(tableView);
+
 
         // ── SQL input pane ─────────────────────────────────────────────────
         var inputFrame = new FrameView
@@ -114,6 +117,22 @@ public static class QueryScreen
 
         // Order matters for z-index — popup must be added last
         top.Add(titleLabel, resultsFrame, inputFrame, statusLabel, popupFrame);
+
+        // ── Right-click: copy cell value to clipboard ─────────────────────
+        tableView.MouseClick += (_, e) =>
+        {
+            if (!e.Flags.HasFlag(MouseFlags.Button3Clicked)) return;
+            if (_currentTable is null) return;
+            var row = tableView.SelectedRow;
+            var col = tableView.SelectedColumn;
+            if (row < 0 || row >= _currentTable.Rows.Count) return;
+            if (col < 0 || col >= _currentTable.Columns.Count) return;
+            var value = _currentTable.Rows[row][col]?.ToString() ?? "";
+            Clipboard.TrySetClipboardData(value);
+            var preview = value.Length > 50 ? value[..50] + "…" : value;
+            statusLabel.Text = $"Copied: {preview}";
+            statusLabel.SetNeedsDraw();
+        };
 
         // ── Cell-position tracker ──────────────────────────────────────────
         tableView.SelectedCellChanged += (_, e) =>
@@ -189,10 +208,12 @@ public static class QueryScreen
             }
 
             // ── Ctrl+Backspace → delete word left ──────────────────────────
-            // Terminals may send 0x7F or Ctrl+H; catch both masks
-            if (key.IsCtrl && (key.KeyCode == KeyCode.Backspace ||
-                               key.KeyCode == (KeyCode.Backspace | KeyCode.CtrlMask)))
+            // Check both the WithCtrl equality and the raw flag OR — terminals vary
+            if (key == Key.Backspace.WithCtrl ||
+                key.KeyCode == (KeyCode.Backspace | KeyCode.CtrlMask) ||
+                (key.IsCtrl && key.KeyCode == KeyCode.Backspace))
             {
+                key.Handled = true;
                 DeleteWordLeft(sqlInput);
                 Application.Invoke(() =>
                     RefreshPopup(sqlInput, popupFrame, popupList, completer, resultsFrame));
@@ -200,9 +221,11 @@ public static class QueryScreen
             }
 
             // ── Ctrl+Delete → delete word right ───────────────────────────
-            if (key.IsCtrl && (key.KeyCode == KeyCode.Delete ||
-                               key.KeyCode == (KeyCode.Delete | KeyCode.CtrlMask)))
+            if (key == Key.Delete.WithCtrl ||
+                key.KeyCode == (KeyCode.Delete | KeyCode.CtrlMask) ||
+                (key.IsCtrl && key.KeyCode == KeyCode.Delete))
             {
+                key.Handled = true;
                 DeleteWordRight(sqlInput);
                 Application.Invoke(() =>
                     RefreshPopup(sqlInput, popupFrame, popupList, completer, resultsFrame));
@@ -486,8 +509,10 @@ public static class QueryScreen
             {
                 _lastRowCount  = result.RowCount;
                 _lastElapsedMs = result.ElapsedMs;
+                _currentTable  = result.Data;
                 tableView.Table = result.Data is not null ? new DataTableSource(result.Data) : null;
                 statusLabel.Text = $"{result.RowCount} rows  {result.ElapsedMs}ms  |  {BuildPreview(sql, 60)}";
+                tableView.SetFocus();
             }
             else
             {

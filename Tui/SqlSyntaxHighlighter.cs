@@ -93,13 +93,19 @@ public static class SqlSyntaxHighlighter
                 map    = BuildMap(text);
             }
 
-            // UnwrappedPosition.Item1 = row in the original text (before word-wrap)
-            // e.Col = column in the current drawn line
+            // DrawNormalColor fires once per LINE — e.Line contains all cells for the line.
+            // We must set Cell.Attribute on each cell individually (Cell is a value type).
             int row = e.UnwrappedPosition.Item1;
-            int col = e.Col;
+            if (row < 0 || row >= map.Length) return;
 
-            if (row >= 0 && row < map.Length && col >= 0 && col < map[row].Length)
-                Application.Driver!.SetAttribute(ColorFor(map[row][col]));
+            var rowMap = map[row];
+            for (int col = 0; col < e.Line.Count; col++)
+            {
+                if (col >= rowMap.Length) break;
+                var cell = e.Line[col];
+                cell.Attribute = ColorFor(rowMap[col]);
+                e.Line[col] = cell;
+            }
         };
     }
 

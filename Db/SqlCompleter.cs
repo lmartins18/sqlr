@@ -167,16 +167,19 @@ public sealed class SqlCompleter
             case CompletionContext.Columns:
                 // Try to extract table refs from the FROM clause
                 var tableRefs = ExtractTableRefs(fullText);
+                var seenCols  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (tableRefs.Count > 0)
                 {
                     foreach (var tRef in tableRefs)
                         foreach (var col in _schema.ColumnsForTable(tRef))
-                            list.Add(new Completion(col.Column, CompletionKind.Column));
+                            if (seenCols.Add(col.Column))
+                                list.Add(new Completion(col.Column, CompletionKind.Column));
                 }
                 else
                 {
                     foreach (var col in _schema.Columns)
-                        list.Add(new Completion(col.Column, CompletionKind.Column));
+                        if (seenCols.Add(col.Column))
+                            list.Add(new Completion(col.Column, CompletionKind.Column));
                 }
                 AddKeywords(list);
                 break;

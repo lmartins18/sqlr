@@ -689,7 +689,9 @@ public static class QueryScreen
                 _lastRowCount  = result.RowCount;
                 _lastElapsedMs = result.ElapsedMs;
                 _currentTable  = result.Data;
-                tableView.Table = result.Data is not null ? new DataTableSource(result.Data) : null;
+                tableView.Table          = result.Data is not null ? new DataTableSource(result.Data) : null;
+                tableView.SelectedRow    = 0;
+                tableView.SelectedColumn = 0;
                 statusLabel.Text = $"{result.RowCount} rows  {result.ElapsedMs}ms  |  {BuildPreview(sql, 60)}";
                 tableView.SetFocus();
             }

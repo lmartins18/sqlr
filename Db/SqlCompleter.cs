@@ -2,53 +2,62 @@ using System.Text.RegularExpressions;
 
 namespace Sqlr.Db;
 
-public enum CompletionKind { Keyword, Table, View, Column, Schema, Database, Routine }
+public enum CompletionKind { Keyword, Table, View, Column, Schema, Database, Routine, Function }
 
 public record Completion(string Text, CompletionKind Kind)
 {
     public string Display => Kind switch
     {
-        CompletionKind.Table   => $"{Text,-35} [table]",
-        CompletionKind.View    => $"{Text,-35} [view]",
-        CompletionKind.Column  => $"{Text,-35} [column]",
-        CompletionKind.Schema  => $"{Text,-35} [schema]",
+        CompletionKind.Table    => $"{Text,-35} [table]",
+        CompletionKind.View     => $"{Text,-35} [view]",
+        CompletionKind.Column   => $"{Text,-35} [column]",
+        CompletionKind.Schema   => $"{Text,-35} [schema]",
         CompletionKind.Database => $"{Text,-35} [database]",
-        CompletionKind.Routine => $"{Text,-35} [proc/fn]",
-        _                      => $"{Text,-35} [keyword]"
+        CompletionKind.Routine  => $"{Text,-35} [proc/fn]",
+        CompletionKind.Function => $"{Text,-35} [function]",
+        _                       => $"{Text,-35} [keyword]"
     };
 }
 
 public sealed class SqlCompleter
 {
-    private static readonly string[] Keywords =
+    private static readonly string[] DmlKeywords =
     [
         "SELECT", "FROM", "WHERE", "JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN",
         "FULL JOIN", "CROSS JOIN", "ON", "AND", "OR", "NOT", "IN", "EXISTS",
         "BETWEEN", "LIKE", "IS NULL", "IS NOT NULL",
         "INSERT INTO", "VALUES", "UPDATE", "SET", "DELETE FROM",
-        "CREATE TABLE", "ALTER TABLE", "DROP TABLE",
-        "CREATE INDEX", "CREATE VIEW", "DROP VIEW",
         "GROUP BY", "ORDER BY", "HAVING", "DISTINCT", "TOP", "AS",
         "UNION", "UNION ALL", "INTERSECT", "EXCEPT",
-        "WITH", "CTE", "CASE", "WHEN", "THEN", "ELSE", "END",
-        "CAST", "CONVERT", "COALESCE", "NULLIF", "ISNULL",
-        "COUNT", "SUM", "AVG", "MIN", "MAX",
-        "GETDATE", "GETUTCDATE", "DATEADD", "DATEDIFF", "DATENAME", "DATEPART",
-        "YEAR", "MONTH", "DAY",
-        "LEN", "LTRIM", "RTRIM", "TRIM", "UPPER", "LOWER", "SUBSTRING",
-        "CHARINDEX", "REPLACE", "STUFF", "FORMAT",
-        "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE", "OVER", "PARTITION BY",
+        "WITH", "CASE", "WHEN", "THEN", "ELSE", "END",
         "EXEC", "EXECUTE", "DECLARE", "BEGIN", "COMMIT", "ROLLBACK",
         "TRY", "CATCH", "THROW", "RAISERROR",
         "USE", "GO", "PRINT",
+        "NOLOCK", "WITH (NOLOCK)", "ROWLOCK", "TABLOCK",
+        "INFORMATION_SCHEMA", "sys"
+    ];
+
+    private static readonly string[] DdlKeywords =
+    [
+        "CREATE TABLE", "ALTER TABLE", "DROP TABLE",
+        "CREATE INDEX", "CREATE VIEW", "DROP VIEW",
+        "PRIMARY KEY", "FOREIGN KEY", "REFERENCES", "UNIQUE", "NOT NULL", "DEFAULT",
         "INT", "BIGINT", "SMALLINT", "TINYINT", "BIT",
         "DECIMAL", "NUMERIC", "FLOAT", "REAL", "MONEY",
         "VARCHAR", "NVARCHAR", "CHAR", "NCHAR", "TEXT", "NTEXT",
         "DATETIME", "DATETIME2", "DATE", "TIME", "DATETIMEOFFSET",
         "UNIQUEIDENTIFIER", "VARBINARY", "IMAGE",
-        "PRIMARY KEY", "FOREIGN KEY", "REFERENCES", "UNIQUE", "NOT NULL", "DEFAULT",
-        "NOLOCK", "WITH (NOLOCK)", "ROWLOCK", "TABLOCK",
-        "INFORMATION_SCHEMA", "sys"
+    ];
+
+    private static readonly string[] SqlFunctions =
+    [
+        "COUNT", "SUM", "AVG", "MIN", "MAX",
+        "CAST", "CONVERT", "COALESCE", "NULLIF", "ISNULL",
+        "GETDATE", "GETUTCDATE", "DATEADD", "DATEDIFF", "DATENAME", "DATEPART",
+        "YEAR", "MONTH", "DAY",
+        "LEN", "LTRIM", "RTRIM", "TRIM", "UPPER", "LOWER", "SUBSTRING",
+        "CHARINDEX", "REPLACE", "STUFF", "FORMAT",
+        "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE", "OVER", "PARTITION BY",
     ];
 
     // Context-triggering keywords (after these, suggest tables/columns/etc.)
@@ -61,21 +70,25 @@ public sealed class SqlCompleter
 
     /// <summary>
     /// Returns a ranked list of completions for the partial text before the cursor.
+    /// <paramref name="fullText"/> is the entire editor content and is used for FROM/JOIN
+    /// scanning so that table refs after the cursor position are also considered.
     /// </summary>
-    public IReadOnlyList<Completion> GetCompletions(string textBeforeCursor)
+    public IReadOnlyList<Completion> GetCompletions(string textBeforeCursor, string? fullText = null)
     {
-        var word    = ExtractCurrentWord(textBeforeCursor);
-        var context = DetectContext(textBeforeCursor, word);
+        var scanText = string.IsNullOrEmpty(fullText) ? textBeforeCursor : fullText;
+        var word     = ExtractCurrentWord(textBeforeCursor);
+        var context  = DetectContext(textBeforeCursor, word);
 
-        var candidates = BuildCandidates(context, textBeforeCursor);
+        var candidates = BuildCandidates(context, textBeforeCursor, scanText);
 
         // Filter by fuzzy prefix match on the current word
         if (!string.IsNullOrEmpty(word))
             candidates = candidates.Where(c => FuzzyMatch(c.Text, word)).ToList();
 
-        // Sort: exact prefix first, then alphabetical within kind
+        // Sort: exact prefix first, then columns before everything else, then alphabetical
         return candidates
             .OrderBy(c => c.Text.StartsWith(word, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(c => c.Kind == CompletionKind.Column ? 0 : 1)
             .ThenBy(c => (int)c.Kind)
             .ThenBy(c => c.Text, StringComparer.OrdinalIgnoreCase)
             .Take(50)
@@ -148,7 +161,9 @@ public sealed class SqlCompleter
 
     // ── Candidate generation ───────────────────────────────────────────────
 
-    private List<Completion> BuildCandidates(CompletionContext ctx, string fullText)
+    // textBeforeCursor — text up to the cursor, used for context detection and dot-parent extraction
+    // scanText         — full editor text, used for FROM/JOIN table ref scanning
+    private List<Completion> BuildCandidates(CompletionContext ctx, string textBeforeCursor, string scanText)
     {
         var list = new List<Completion>();
 
@@ -165,39 +180,38 @@ public sealed class SqlCompleter
                 break;
 
             case CompletionContext.Columns:
-                // Try to extract table refs from the FROM clause
-                var tableRefs = ExtractTableRefs(fullText);
-                var seenCols  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                // Scan the full query text so FROM clauses after the cursor are also found.
+                // Only show columns from tables explicitly referenced — no all-schema fallback.
+                // Only functions (not DDL/DML keywords) are relevant alongside column names.
+                var tableRefs = ExtractTableNames(scanText);
                 if (tableRefs.Count > 0)
                 {
+                    var seenCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var tRef in tableRefs)
                         foreach (var col in _schema.ColumnsForTable(tRef))
                             if (seenCols.Add(col.Column))
                                 list.Add(new Completion(col.Column, CompletionKind.Column));
                 }
-                else
-                {
-                    foreach (var col in _schema.Columns)
-                        if (seenCols.Add(col.Column))
-                            list.Add(new Completion(col.Column, CompletionKind.Column));
-                }
-                AddKeywords(list);
+                AddFunctions(list);
                 break;
 
             case CompletionContext.DotColumns:
-                // Parent is the identifier just before the dot
-                var parent = ExtractParentBeforeDot(fullText);
+                // Identifier immediately before the dot — may be a table name or an alias.
+                var parent = ExtractParentBeforeDot(textBeforeCursor);
                 if (!string.IsNullOrEmpty(parent))
                 {
-                    // Try as table name first
-                    var cols = _schema.ColumnsForTable(parent).ToList();
+                    // Resolve alias → table name using the full query text
+                    var aliases  = ExtractAliasMap(scanText);
+                    var resolved = aliases.TryGetValue(parent, out var aliasTarget) ? aliasTarget : parent;
+
+                    var cols = _schema.ColumnsForTable(resolved).ToList();
                     if (cols.Count > 0)
                         foreach (var col in cols)
                             list.Add(new Completion(col.Column, CompletionKind.Column));
                     else
-                        // Try as schema name
+                        // Try as schema name → suggest tables in that schema
                         foreach (var t in _schema.Tables.Where(t =>
-                            t.Schema.Equals(parent, StringComparison.OrdinalIgnoreCase)))
+                            t.Schema.Equals(resolved, StringComparison.OrdinalIgnoreCase)))
                             list.Add(new Completion(t.Name, t.IsView ? CompletionKind.View : CompletionKind.Table));
                 }
                 break;
@@ -214,7 +228,9 @@ public sealed class SqlCompleter
 
             case CompletionContext.Keywords:
             default:
-                AddKeywords(list);
+                AddDmlKeywords(list);
+                AddDdlKeywords(list);
+                AddFunctions(list);
                 foreach (var t in _schema.Tables)
                     list.Add(new Completion(t.Name, t.IsView ? CompletionKind.View : CompletionKind.Table));
                 foreach (var r in _schema.Routines)
@@ -225,13 +241,24 @@ public sealed class SqlCompleter
         return list;
     }
 
-    private static void AddKeywords(List<Completion> list)
+    private static void AddDmlKeywords(List<Completion> list)
     {
-        foreach (var kw in Keywords)
+        foreach (var kw in DmlKeywords)
             list.Add(new Completion(kw, CompletionKind.Keyword));
     }
 
-    // Extract table/alias names from the FROM clause of the current statement
+    private static void AddDdlKeywords(List<Completion> list)
+    {
+        foreach (var kw in DdlKeywords)
+            list.Add(new Completion(kw, CompletionKind.Keyword));
+    }
+
+    private static void AddFunctions(List<Completion> list)
+    {
+        foreach (var fn in SqlFunctions)
+            list.Add(new Completion(fn, CompletionKind.Function));
+    }
+
     private static readonly Regex FromPattern = new(
         @"\bFROM\b\s+([\w\.\[\]""]+)(?:\s+(?:AS\s+)?(\w+))?",
         RegexOptions.IgnoreCase);
@@ -240,22 +267,31 @@ public sealed class SqlCompleter
         @"\bJOIN\b\s+([\w\.\[\]""]+)(?:\s+(?:AS\s+)?(\w+))?",
         RegexOptions.IgnoreCase);
 
-    private static List<string> ExtractTableRefs(string sql)
+    private static string TableNameFromRaw(string raw) =>
+        raw.Trim('[', ']', '"', '`').Split('.').Last(p => p.Length > 0);
+
+    /// <summary>Returns the bare table names referenced in FROM/JOIN clauses (no aliases).</summary>
+    private static List<string> ExtractTableNames(string sql)
     {
-        var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match m in FromPattern.Matches(sql))
-        {
-            var raw = m.Groups[1].Value.Trim('[', ']', '"', '`');
-            refs.Add(raw.Contains('.') ? raw.Split('.').Last() : raw);
-            if (m.Groups[2].Success) refs.Add(m.Groups[2].Value);
-        }
+            names.Add(TableNameFromRaw(m.Groups[1].Value));
         foreach (Match m in JoinPattern.Matches(sql))
-        {
-            var raw = m.Groups[1].Value.Trim('[', ']', '"', '`');
-            refs.Add(raw.Contains('.') ? raw.Split('.').Last() : raw);
-            if (m.Groups[2].Success) refs.Add(m.Groups[2].Value);
-        }
-        return [.. refs];
+            names.Add(TableNameFromRaw(m.Groups[1].Value));
+        return [.. names];
+    }
+
+    /// <summary>Returns a map of alias → bare table name for every aliased FROM/JOIN clause.</summary>
+    private static Dictionary<string, string> ExtractAliasMap(string sql)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match m in FromPattern.Matches(sql))
+            if (m.Groups[2].Success)
+                map[m.Groups[2].Value] = TableNameFromRaw(m.Groups[1].Value);
+        foreach (Match m in JoinPattern.Matches(sql))
+            if (m.Groups[2].Success)
+                map[m.Groups[2].Value] = TableNameFromRaw(m.Groups[1].Value);
+        return map;
     }
 
     private static string ExtractParentBeforeDot(string text)

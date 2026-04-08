@@ -164,6 +164,7 @@ public static class QueryScreen
                         return;
                     case KeyCode.Esc:
                         HidePopup(popupFrame);
+                        key.Handled = true;
                         return;
                     case KeyCode.F5:
                     case KeyCode.F2:
@@ -255,6 +256,7 @@ public static class QueryScreen
             {
                 Application.Invoke(() =>
                 {
+                    ExpandDoubleDot(sqlInput);
                     if (!_suppressCompletion)
                         RefreshPopup(sqlInput, popupFrame, popupList, completer, resultsFrame);
                 });
@@ -497,7 +499,7 @@ public static class QueryScreen
             return;
         }
 
-        var completions = completer.GetCompletions(before);
+        var completions = completer.GetCompletions(before, sqlInput.Text ?? "");
         if (completions.Count == 0)
         {
             HidePopup(popup);
@@ -664,6 +666,30 @@ public static class QueryScreen
 
     private static bool IsWordChar(char c) =>
         char.IsLetterOrDigit(c) || c == '_' || c == '#' || c == '@';
+
+    /// <summary>
+    /// If the two characters immediately before the cursor are "..", replace them with ".dbo."
+    /// so that cross-database shorthand (db..table) expands to a valid three-part name.
+    /// </summary>
+    private static void ExpandDoubleDot(TextView tv)
+    {
+        var text = tv.Text ?? "";
+        var pos  = GetLinearCursorPos(tv);
+        if (pos < 2 || text[pos - 1] != '.' || text[pos - 2] != '.') return;
+
+        _suppressCompletion = true;
+        try
+        {
+            tv.Text = text[..(pos - 2)] + ".dbo." + text[pos..];
+            var newPos        = pos - 2 + 5; // ".dbo." is 5 chars
+            var (row, col)    = LinearToRowCol(tv.Text, newPos);
+            tv.CursorPosition = new System.Drawing.Point(col, row);
+        }
+        finally
+        {
+            _suppressCompletion = false;
+        }
+    }
 
     // ── Query execution ────────────────────────────────────────────────────
 

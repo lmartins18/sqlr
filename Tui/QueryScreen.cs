@@ -61,7 +61,7 @@ public static class QueryScreen
         // ── SQL input pane ─────────────────────────────────────────────────
         var inputFrame = new FrameView
         {
-            Title       = " sql   F5=Execute   F2=Clear   Tab=Results   Ctrl+Q=Quit ",
+            Title       = " sql   F5=Execute   F2=Clear   F12=Peek   Tab=Results   Ctrl+Q=Quit ",
             X           = 0,
             Y           = Pos.Bottom(resultsFrame),
             Width       = Dim.Fill(),
@@ -167,6 +167,7 @@ public static class QueryScreen
                         return;
                     case KeyCode.F5:
                     case KeyCode.F2:
+                    case KeyCode.F12:
                         HidePopup(popupFrame);
                         break;  // fall through to handle below
                 }
@@ -199,6 +200,21 @@ public static class QueryScreen
                     statusLabel.SetNeedsDraw();
                     HidePopup(popupFrame);
                     return;
+
+                case KeyCode.F12:
+                {
+                    var word = GetWordUnderCursor(sqlInput);
+                    if (string.IsNullOrWhiteSpace(word))
+                    {
+                        statusLabel.Text = "No identifier at cursor.";
+                        statusLabel.SetNeedsDraw();
+                    }
+                    else
+                    {
+                        _ = ShowTableStructureAsync(word, statusLabel, runner, schema);
+                    }
+                    return;
+                }
             }
 
             if (key.KeyCode == (KeyCode.Q | KeyCode.CtrlMask))
@@ -266,6 +282,169 @@ public static class QueryScreen
         sqlInput.SetFocus();
         Application.Run(top);
         top.Dispose();
+    }
+
+    // ── Table structure peek (F12) ─────────────────────────────────────────
+
+    private static string GetWordUnderCursor(TextView tv)
+    {
+        var text  = tv.Text ?? "";
+        var lines = text.Split('\n');
+        var row   = tv.CurrentRow;
+        if (row >= lines.Length) return "";
+
+        var line = lines[row];
+        var col  = Math.Min(tv.CurrentColumn, line.Length);
+
+        static bool IsIdentChar(char c) =>
+            char.IsLetterOrDigit(c) || c == '_' || c == '#' || c == '.' || c == '[' || c == ']';
+
+        // If cursor is past last char or not on an ident char, check one position back
+        if (col >= line.Length || !IsIdentChar(line[col]))
+        {
+            if (col > 0 && IsIdentChar(line[col - 1]))
+                col--;
+            else
+                return "";
+        }
+
+        int start = col;
+        while (start > 0 && IsIdentChar(line[start - 1]))
+            start--;
+
+        int end = col + 1;
+        while (end < line.Length && IsIdentChar(line[end]))
+            end++;
+
+        return line[start..end].Trim('.');
+    }
+
+    private static async Task ShowTableStructureAsync(
+        string word, Label statusLabel, SqlRunner runner, DatabaseSchema schema)
+    {
+        // Parse multi-part name: db..table  schema.table  table
+        var parts      = word.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        var rawTable   = parts[^1].Trim('[', ']');
+        var rawSchema  = parts.Length >= 2 ? parts[^2].Trim('[', ']') : "";
+
+        // If the "schema" segment is actually a database name, discard it
+        if (!string.IsNullOrEmpty(rawSchema) &&
+            !schema.Schemas.Contains(rawSchema, StringComparer.OrdinalIgnoreCase))
+            rawSchema = "";
+
+        // Sanitize: strip non-word chars so we can interpolate safely
+        var tableName  = System.Text.RegularExpressions.Regex.Replace(rawTable,  @"[^\w#]", "");
+        var schemaName = System.Text.RegularExpressions.Regex.Replace(rawSchema, @"[^\w#]", "");
+
+        if (string.IsNullOrEmpty(tableName)) return;
+
+        Application.Invoke(() =>
+        {
+            statusLabel.Text = $"Looking up: {tableName}…";
+            statusLabel.SetNeedsDraw();
+            Application.LayoutAndDraw();
+        });
+
+        var schemaFilter = string.IsNullOrEmpty(schemaName)
+            ? ""
+            : $"AND c.TABLE_SCHEMA = '{schemaName}'";
+
+        var sql = $"""
+            SELECT
+                c.COLUMN_NAME AS [Column],
+                CASE
+                    WHEN c.CHARACTER_MAXIMUM_LENGTH = -1
+                        THEN c.DATA_TYPE + '(max)'
+                    WHEN c.CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+                        THEN c.DATA_TYPE + '(' + CAST(c.CHARACTER_MAXIMUM_LENGTH AS varchar) + ')'
+                    WHEN c.DATA_TYPE IN ('decimal','numeric') AND c.NUMERIC_PRECISION IS NOT NULL
+                        THEN c.DATA_TYPE + '(' + CAST(c.NUMERIC_PRECISION AS varchar)
+                             + ',' + CAST(ISNULL(c.NUMERIC_SCALE,0) AS varchar) + ')'
+                    ELSE c.DATA_TYPE
+                END AS [Type],
+                c.IS_NULLABLE AS [Nullable],
+                ISNULL(c.COLUMN_DEFAULT, '') AS [Default],
+                CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'PK' ELSE '' END AS [Key]
+            FROM INFORMATION_SCHEMA.COLUMNS c
+            LEFT JOIN (
+                SELECT ku.TABLE_SCHEMA, ku.TABLE_NAME, ku.COLUMN_NAME
+                FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku
+                INNER JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                    ON  tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
+                    AND tc.TABLE_SCHEMA    = ku.TABLE_SCHEMA
+                    AND tc.TABLE_NAME      = ku.TABLE_NAME
+                    AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+            ) pk ON pk.TABLE_SCHEMA = c.TABLE_SCHEMA
+                AND pk.TABLE_NAME   = c.TABLE_NAME
+                AND pk.COLUMN_NAME  = c.COLUMN_NAME
+            WHERE c.TABLE_NAME = '{tableName}'
+            {schemaFilter}
+            ORDER BY c.ORDINAL_POSITION
+            """;
+
+        var result = await runner.ExecuteAsync(sql);
+
+        Application.Invoke(() =>
+        {
+            if (!result.IsSuccess)
+            {
+                statusLabel.Text = $"Peek error: {result.Error}";
+                statusLabel.SetNeedsDraw();
+                return;
+            }
+
+            if (result.Data is null || result.Data.Rows.Count == 0)
+            {
+                statusLabel.Text = $"'{tableName}' not found in schema.";
+                statusLabel.SetNeedsDraw();
+                return;
+            }
+
+            var tableInfo = schema.Tables
+                .FirstOrDefault(t => t.Name.Equals(tableName, StringComparison.OrdinalIgnoreCase)
+                                  && (string.IsNullOrEmpty(schemaName)
+                                      || t.Schema.Equals(schemaName, StringComparison.OrdinalIgnoreCase)));
+
+            var kind     = tableInfo?.IsView == true ? "View" : "Table";
+            var fullName = tableInfo?.FullName ?? tableName;
+
+            ShowStructureDialog(fullName, kind, result.Data);
+
+            statusLabel.Text = $"{kind}: {fullName}  ·  {result.Data.Rows.Count} columns";
+            statusLabel.SetNeedsDraw();
+        });
+    }
+
+    private static void ShowStructureDialog(string fullName, string kind, DataTable data)
+    {
+        var dialog = new Dialog
+        {
+            Title       = $" {kind}: {fullName} ",
+            Width       = Dim.Percent(85),
+            Height      = Dim.Percent(75),
+            ColorScheme = Theme.Base,
+        };
+
+        var tv = new TableView
+        {
+            X             = 0, Y = 0,
+            Width         = Dim.Fill(),
+            Height        = Dim.Fill(),
+            ColorScheme   = Theme.Base,
+            FullRowSelect = true,
+            MultiSelect   = false,
+        };
+        ConfigureTableStyle(tv);
+        tv.Table = new DataTableSource(data);
+        dialog.Add(tv);
+
+        var closeBtn = new Button { Text = "Close" };
+        closeBtn.Accepting += (_, _) => Application.RequestStop();
+        dialog.AddButton(closeBtn);
+
+        tv.SetFocus();
+        Application.Run(dialog);
+        dialog.Dispose();
     }
 
     // ── Key classification helpers ─────────────────────────────────────────

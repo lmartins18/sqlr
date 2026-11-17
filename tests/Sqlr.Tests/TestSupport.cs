@@ -12,6 +12,7 @@ internal static class TestSetup
         var home = Path.Combine(Path.GetTempPath(), "sqlr-tests-" + Environment.ProcessId);
         Directory.CreateDirectory(home);
         Environment.SetEnvironmentVariable("SQLR_HOME", home);
+        Environment.SetEnvironmentVariable(Sqlr.Config.SecretVault.DisableVariable, "1"); // never the real Keychain
     }
 }
 

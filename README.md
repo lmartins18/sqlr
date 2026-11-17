@@ -14,7 +14,7 @@ Most SQL GUIs are slow, heavy, and mouse-driven. `sqlr` gives you:
 - **SQL IntelliSense as you type** — context-aware completions from your live schema (tables, columns, aliases, procs, variables)
 - **Keyboard-first** — navigate everything without touching the mouse
 - **Real script support** — `GO` batches, multiple result sets, PRINT / RAISERROR messages, rows affected, cancel with `Esc`
-- **Multi-connection management** — saved connections with Windows auth, SQL auth, or domain auth (a Windows login from macOS / Linux; passwords DPAPI-encrypted on Windows)
+- **Multi-connection management** — saved connections with Windows auth, SQL auth, or domain auth (a Windows login from macOS / Linux); passwords in the macOS Keychain, DPAPI-encrypted on Windows
 - **Scriptable** — `sqlr -c prod -q "select …" -f csv` for pipes and scripts
 
 ---
@@ -237,9 +237,22 @@ Everything lives in `~/.sqlr` (override with the `SQLR_HOME` environment variabl
 ```
 
 An empty `database` uses the login's default database. Passwords are entered through
-`sqlr connections add` or the picker: on **Windows** they're stored DPAPI-encrypted
-(`protectedPassword`, readable only by your Windows account) and existing plain-text passwords are
-migrated automatically. On macOS / Linux they're stored in plain text in a file only you can read (`0600`).
+`sqlr connections add` or the picker, and where they're kept depends on the OS:
+
+| OS | Stored in |
+|---|---|
+| macOS | the login **Keychain**: one "application password" per connection, service `sqlr`, account = the connection name. See it in Keychain Access, or `security find-generic-password -s sqlr -a staging -w` |
+| Windows | `connections.json`, DPAPI-encrypted (`protectedPassword`, readable only by your Windows account) |
+| Linux | `connections.json` in plain text, in a file only you can read (`0600`) |
+
+Plain-text passwords from older configs move to the Keychain / DPAPI the next time sqlr starts.
+Renaming or deleting a connection moves or deletes its Keychain item.
+
+On macOS, sqlr reads a password the first time it connects. After you update sqlr, macOS asks
+once per password whether the new build may use it (the binary is ad-hoc signed, so each build
+counts as a new app). Choose **Always Allow**. Over SSH the Keychain is locked: run
+`security unlock-keychain` first, or set `SQLR_NO_KEYCHAIN=1` to keep passwords in the `0600` file
+instead.
 
 ### Authentication
 

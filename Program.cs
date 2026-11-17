@@ -135,7 +135,7 @@ static SqlrConnection? AddConnectionCli(SqlrConnection? existing)
             }
             Console.Write(existing?.UsesPassword == true ? "Password (blank = unchanged) : " : "Password : ");
             var pw = ReadSecret();
-            conn.Secret = pw.Length == 0 && existing?.UsesPassword == true ? existing.Secret : pw;
+            if (pw.Length > 0 || existing?.UsesPassword != true) conn.Secret = pw; // blank keeps the stored one
         }
 
         var store   = ConnectionStore.Load();
@@ -157,6 +157,11 @@ static SqlrConnection? AddConnectionCli(SqlrConnection? existing)
     {
         Console.WriteLine();
         Console.Error.WriteLine("Cancelled.");
+        return null;
+    }
+    catch (SecretVaultException ex)
+    {
+        Console.Error.WriteLine(ex.Message);
         return null;
     }
 }
@@ -194,7 +199,10 @@ static async Task<bool> TestConnection(string name)
     if (conn is null) { Console.Error.WriteLine($"Not found: '{name}'."); return false; }
     Console.Write($"Testing '{name}' ({conn.Server}/{conn.DatabaseLabel})... ");
     var sw = System.Diagnostics.Stopwatch.StartNew();
-    var (ok, err, version) = await SqlRunner.TestAsync(conn.ConnectionString);
+    string cs;
+    try { cs = conn.ConnectionString; }
+    catch (SecretVaultException ex) { Console.WriteLine($"FAILED\n{ex.Message}"); return false; }
+    var (ok, err, version) = await SqlRunner.TestAsync(cs);
     Console.WriteLine(ok ? $"OK in {sw.ElapsedMilliseconds} ms (SQL Server {version})" : $"FAILED\n{err}");
     return ok;
 }
@@ -323,7 +331,15 @@ static async Task<ScreenExit?> RunQueryScreenAsync(SqlrConnection conn, string? 
                                                    QueryHistory history, string? initialText, string? openFile)
 {
     Console.Write($"Connecting to {conn.Server}/{database ?? conn.DatabaseLabel}... ");
-    using var runner = new SqlRunner(conn.BuildConnectionString(database))
+    string cs;
+    try { cs = conn.BuildConnectionString(database); }
+    catch (SecretVaultException ex)
+    {
+        Console.Error.WriteLine("failed.");
+        Console.Error.WriteLine(ex.Message);
+        return null;
+    }
+    using var runner = new SqlRunner(cs)
     {
         MaxRows               = settings.MaxRows,
         CommandTimeoutSeconds = settings.QueryTimeoutSeconds

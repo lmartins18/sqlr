@@ -158,7 +158,9 @@ public static class ConnectionPicker
                     var sw = System.Diagnostics.Stopwatch.StartNew();
                     _ = Task.Run(async () =>
                     {
-                        var (ok, err, version) = await SqlRunner.TestAsync(conn.ConnectionString);
+                        bool ok; string err, version;
+                        try { (ok, err, version) = await SqlRunner.TestAsync(conn.ConnectionString); }
+                        catch (SecretVaultException ex) { (ok, err, version) = (false, ex.Message, ""); }
                         Application.Invoke(() =>
                         {
                             if (gen != testGeneration) return; // a newer test superseded this one
@@ -279,7 +281,12 @@ public static class ConnectionPicker
                 conn.Username = username;
                 var typed = fldPassword.Text ?? "";
                 // Blank password on edit = keep the stored one
-                conn.Secret = typed.Length > 0 || src is null || !src.UsesPassword ? typed : src.Secret;
+                try { conn.Secret = typed.Length > 0 || src is null || !src.UsesPassword ? typed : src.Secret; }
+                catch (SecretVaultException ex)
+                {
+                    error = ex.Message;
+                    return null;
+                }
             }
             return conn;
         }
@@ -301,8 +308,16 @@ public static class ConnectionPicker
                 MessageBox.Query("Overwrite", $"A connection named '{conn.Name}' exists. Replace it?", "Replace", "Cancel") != 0)
                 return;
 
-            if (existing is null) store.Add(conn);
-            else store.Update(existing.Name, conn);
+            try
+            {
+                if (existing is null) store.Add(conn);
+                else store.Update(existing.Name, conn);
+            }
+            catch (SecretVaultException ex)
+            {
+                MessageBox.ErrorQuery("Keychain", ex.Message, "OK");
+                return;
+            }
             savedName = conn.Name;
             Application.RequestStop(dlg);
         };

@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -15,7 +16,10 @@ public class SqlrConnection
     public string AuthType { get; set; } = "windows";
     public string? Username { get; set; }
 
-    /// <summary>Plain-text password (macOS/Linux, or configs written by older versions).</summary>
+    /// <summary>
+    /// Plain-text password: Linux, macOS with SQLR_NO_KEYCHAIN=1, or configs written by older versions
+    /// (moved to the Keychain / DPAPI when the store loads).
+    /// </summary>
     public string? Password { get; set; }
 
     /// <summary>DPAPI-encrypted password, base64 (Windows only — tied to the current Windows user).</summary>
@@ -43,39 +47,85 @@ public class SqlrConnection
         return i > 0 && i < user!.Length - 1;
     }
 
+    /// <summary>Where this connection's password lives when it isn't in the file (the macOS Keychain).</summary>
+    internal ISecretVault? Vault { get; set; }
+
+    private string? _secret;
+    private bool _secretKnown;
+
+    /// <summary>A password was set and not yet stored.</summary>
+    internal bool SecretChanged { get; private set; }
+
     /// <summary>
-    /// The usable password. Setting it stores it encrypted on Windows and in plain text elsewhere.
+    /// The usable password. Setting it only changes this object: <see cref="ConnectionStore"/> stores
+    /// it on Add / Update (Keychain on macOS, DPAPI on Windows, plain text on Linux). Reading it may
+    /// fetch it from the Keychain, which throws <see cref="SecretVaultException"/> when access fails.
     /// </summary>
     [JsonIgnore]
     public string? Secret
     {
         get
         {
-            if (ProtectedPassword is null || !OperatingSystem.IsWindows()) return Password;
-            try
-            {
-                var bytes = ProtectedData.Unprotect(Convert.FromBase64String(ProtectedPassword), null, DataProtectionScope.CurrentUser);
-                return Encoding.UTF8.GetString(bytes);
-            }
-            catch (Exception ex) when (ex is CryptographicException or FormatException)
-            {
-                // Encrypted by another Windows user / machine — the login will fail with a clear error.
-                return null;
-            }
+            if (_secretKnown) return _secret;
+            if (ProtectedPassword is not null && OperatingSystem.IsWindows()) return Unprotect(ProtectedPassword);
+            if (Password is not null || Vault is null || !UsesPassword) return Password;
+
+            _secret = Vault.Read(Name);
+            _secretKnown = true;
+            return _secret;
         }
         set
         {
-            if (value is not null && OperatingSystem.IsWindows())
-            {
-                var bytes = ProtectedData.Protect(Encoding.UTF8.GetBytes(value), null, DataProtectionScope.CurrentUser);
-                ProtectedPassword = Convert.ToBase64String(bytes);
-                Password          = null;
-            }
-            else
-            {
-                Password          = value;
-                ProtectedPassword = null;
-            }
+            _secret = value;
+            _secretKnown = true;
+            SecretChanged = true;
+        }
+    }
+
+    /// <summary>
+    /// Stores a password set since the last call where it belongs: in <paramref name="vault"/> when
+    /// there is one, otherwise in this object's DPAPI / plain-text field. Without a password (none
+    /// needed, or blank) the vault entry is removed.
+    /// </summary>
+    internal void StoreSecret(ISecretVault? vault)
+    {
+        Vault = vault;
+        if (!SecretChanged) return;
+
+        var secret = UsesPassword && !string.IsNullOrEmpty(_secret) ? _secret : null;
+        if (vault is not null)
+        {
+            if (secret is null) vault.Delete(Name);
+            else vault.Write(Name, secret);
+            Password = null;
+            ProtectedPassword = null;
+        }
+        else if (secret is not null && OperatingSystem.IsWindows())
+        {
+            ProtectedPassword = Convert.ToBase64String(
+                ProtectedData.Protect(Encoding.UTF8.GetBytes(secret), null, DataProtectionScope.CurrentUser));
+            Password = null;
+        }
+        else
+        {
+            Password = secret;
+            ProtectedPassword = null;
+        }
+        SecretChanged = false;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static string? Unprotect(string protectedPassword)
+    {
+        try
+        {
+            var bytes = ProtectedData.Unprotect(Convert.FromBase64String(protectedPassword), null, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException)
+        {
+            // Encrypted by another Windows user / machine — the login will fail with a clear error.
+            return null;
         }
     }
 

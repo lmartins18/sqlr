@@ -77,8 +77,8 @@ public sealed class SqlRunner : IDisposable
         try
         {
             _conn?.Dispose();
-            _conn = CreateConnection();
-            await _conn.OpenAsync(ct);
+            _conn = CreateConnection(_connectionString);
+            await SqlConnect.OpenAsync(_conn, ct);
             _lastDatabase = _conn.Database;
             ServerVersion = _conn.ServerVersion;
             return null;
@@ -96,8 +96,7 @@ public sealed class SqlRunner : IDisposable
     {
         try
         {
-            await using var conn = new SqlConnection(connectionString);
-            await conn.OpenAsync(ct);
+            await using var conn = await SqlConnect.OpenAsync(connectionString, ct);
             return (true, "", conn.ServerVersion);
         }
         catch (Exception ex)
@@ -180,8 +179,8 @@ public sealed class SqlRunner : IDisposable
             var cs = string.IsNullOrEmpty(_lastDatabase)
                 ? _connectionString
                 : new SqlConnectionStringBuilder(_connectionString) { InitialCatalog = _lastDatabase }.ConnectionString;
-            _conn = new SqlConnection(cs) { FireInfoMessageEventOnUserErrors = true };
-            _conn.Open();
+            _conn = CreateConnection(cs);
+            SqlConnect.Open(_conn);
 
             if (!string.IsNullOrEmpty(_lastDatabase) && !_lastDatabase.Equals(_conn.Database, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"the server put the session in '{_conn.Database}' instead of '{_lastDatabase}'.");
@@ -203,10 +202,14 @@ public sealed class SqlRunner : IDisposable
         }
     }
 
-    private SqlConnection CreateConnection() =>
+    private static SqlConnection CreateConnection(string connectionString)
+    {
         // Errors of severity <= 16 arrive as InfoMessage events instead of exceptions, so a failing
         // statement doesn't throw away the result sets and messages around it (SSMS behaviour).
-        new(_connectionString) { FireInfoMessageEventOnUserErrors = true };
+        var conn = SqlConnect.Create(connectionString);
+        conn.FireInfoMessageEventOnUserErrors = true;
+        return conn;
+    }
 
     private void RunBatch(SqlBatch batch, int lineOffset, ExecutionResult result, CancellationToken ct)
     {

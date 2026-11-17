@@ -14,7 +14,7 @@ Most SQL GUIs are slow, heavy, and mouse-driven. `sqlr` gives you:
 - **SQL IntelliSense as you type** — context-aware completions from your live schema (tables, columns, aliases, procs, variables)
 - **Keyboard-first** — navigate everything without touching the mouse
 - **Real script support** — `GO` batches, multiple result sets, PRINT / RAISERROR messages, rows affected, cancel with `Esc`
-- **Multi-connection management** — saved connections with Windows auth or SQL auth (passwords DPAPI-encrypted on Windows)
+- **Multi-connection management** — saved connections with Windows auth, SQL auth, or domain auth (a Windows login from macOS / Linux; passwords DPAPI-encrypted on Windows)
 - **Scriptable** — `sqlr -c prod -q "select …" -f csv` for pipes and scripts
 
 ---
@@ -228,7 +228,8 @@ Everything lives in `~/.sqlr` (override with the `SQLR_HOME` environment variabl
 {
   "connections": [
     { "name": "staging", "server": "db-server.internal", "database": "MyApp", "authType": "windows" },
-    { "name": "local",   "server": "localhost,1433",     "database": "",      "authType": "sql", "username": "sa" }
+    { "name": "local",   "server": "localhost,1433",     "database": "",      "authType": "sql", "username": "sa" },
+    { "name": "mac",     "server": "db.corp.local",      "database": "MyApp", "authType": "domain", "username": "CORP\\jdoe" }
   ]
 }
 ```
@@ -237,6 +238,18 @@ An empty `database` uses the login's default database. Passwords are entered thr
 `sqlr connections add` or the picker: on **Windows** they're stored DPAPI-encrypted
 (`protectedPassword`, readable only by your Windows account) and existing plain-text passwords are
 migrated automatically. On macOS / Linux they're stored in plain text in a file only you can read (`0600`).
+
+### Authentication
+
+| `authType` | Logs in as | Use it |
+|---|---|---|
+| `windows` | the Windows account you're signed in with | on a domain-joined Windows machine. On macOS / Linux it only works with a Kerberos ticket (`kinit you@CORP.LOCAL`) |
+| `sql` | a SQL Server login (`username` + password) | when the server has SQL logins |
+| `domain` | a Windows domain account: `CORP\jdoe` or `jdoe@corp.local` + its password, over NTLM | from a Mac or Linux box, like DataGrip's "domain credentials". Needs nothing installed or joined |
+
+`domain` uses SqlClient's custom SSPI hook with .NET's built-in NTLM, so it also works on Windows
+(handy for logging in as another domain account). The server must allow NTLM, which domain SQL
+Servers do unless an admin turned it off.
 
 `settings.json` (all optional):
 

@@ -41,8 +41,7 @@ public static class ObjectCatalog
     public static async Task<List<CatalogObject>> LoadAsync(string connectionString, CancellationToken ct = default)
     {
         var list = new List<CatalogObject>();
-        await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqlConnect.OpenAsync(connectionString, ct);
         await using var cmd = new SqlCommand(
             """
             SELECT s.name, o.name, RTRIM(o.type), o.modify_date
@@ -63,8 +62,7 @@ public static class ObjectCatalog
     public static async Task<List<GrepHit>> GrepAsync(string connectionString, string pattern, int maxHits, CancellationToken ct = default)
     {
         var hits = new List<GrepHit>();
-        await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqlConnect.OpenAsync(connectionString, ct);
 
         // The server narrows to the matching objects (CHARINDEX follows the database collation);
         // exact smart-case matching and line splitting happen here.

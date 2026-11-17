@@ -87,8 +87,7 @@ public sealed class DatabaseSchema
 
         try
         {
-            await using var conn = new SqlConnection(connectionString);
-            await conn.OpenAsync(ct);
+            await using var conn = await SqlConnect.OpenAsync(connectionString, ct);
             schema.DatabaseName = conn.Database;
 
             await RunQueryAsync(schema, conn, "SELECT name FROM sys.databases ORDER BY name",

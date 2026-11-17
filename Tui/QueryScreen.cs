@@ -967,7 +967,7 @@ public sealed class QueryScreen
         var s          = _schema.Current;
         var schemaInfo = _schema.IsLoading ? "loading schema…" : $"{s.UserTables.Count():N0} tables";
         var file       = _currentFile is null ? "" : $"  ·  {Path.GetFileName(_currentFile)}{(_editor.IsDirty ? " *" : "")}";
-        var auth       = _conn.IsSqlAuth ? _conn.Username : "windows auth";
+        var auth       = _conn.UsesPassword ? _conn.Username : "windows auth";
         _title.Text = $"  ◈ sqlr   {_conn.Name}  ·  {_conn.Server} / {_database}  ·  {auth}  ·  {schemaInfo}{file}";
     }
 

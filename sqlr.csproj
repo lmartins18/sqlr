@@ -28,7 +28,14 @@
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="11.0.0" />
     <PackageReference Include="Terminal.Gui" Version="2.0.0" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <!-- SqlClient 7.0.2 pulls 9.0.13, which has known vulnerabilities -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Domain logins use .NET's own NTLM on Linux too (macOS already defaults to it), so no gss-ntlmssp is needed -->
+    <RuntimeHostConfigurationOption Include="System.Net.Security.UseManagedNtlm" Value="true" />
   </ItemGroup>
 
 </Project>

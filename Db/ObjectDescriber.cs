@@ -37,8 +37,7 @@ public static class ObjectDescriber
     /// <returns>The description, or null when no such object exists.</returns>
     public static async Task<ObjectDescription?> DescribeAsync(string connectionString, string? schema, string name, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqlConnect.OpenAsync(connectionString, ct);
 
         // ── Resolve the object (prefer the user's default schema, then dbo) ──
         var matches = new List<(int Id, string Schema, string Name, string Type)>();

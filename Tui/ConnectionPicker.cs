@@ -61,6 +61,8 @@ public static class ConnectionPicker
             ColorScheme = Theme.StatusBar
         };
 
+        status.NoHotKey();
+
         void SetStatus(string text, ColorScheme scheme)
         {
             status.Text        = "  " + text;
@@ -217,8 +219,8 @@ public static class ConnectionPicker
         var rbAuth      = new RadioGroup
         {
             X            = 18, Y = 7,
-            RadioLabels  = ["Windows (integrated)", "SQL (username / password)"],
-            SelectedItem = src?.IsSqlAuth == true ? 1 : 0,
+            RadioLabels  = ["Windows (integrated)", "SQL (username / password)", @"Domain (DOMAIN\user + password)"],
+            SelectedItem = src?.IsSqlAuth == true ? 1 : src?.IsDomainAuth == true ? 2 : 0,
             ColorScheme  = Theme.Base
         };
         var fldUsername = Field(10, src?.Username ?? "");
@@ -226,16 +228,17 @@ public static class ConnectionPicker
         {
             X = 18, Y = 12, Width = 44,
             Secret = true, Text = "", ColorScheme = Theme.Input,
-            Caption = src?.IsSqlAuth == true ? "(unchanged)" : ""
+            Caption = src?.UsesPassword == true ? "(unchanged)" : ""
         };
         var lblDbHint = new Label { Text = "empty = login's default database", X = 18, Y = 6, ColorScheme = Theme.StatusBar };
         var lblResult = new Label { Text = "", X = 1, Y = 14, Width = Dim.Fill(1), ColorScheme = Theme.StatusBar };
 
         void SyncAuth()
         {
-            bool sql = rbAuth.SelectedItem == 1;
-            fldUsername.Enabled = sql;
-            fldPassword.Enabled = sql;
+            bool login = rbAuth.SelectedItem != 0;
+            fldUsername.Enabled = login;
+            fldPassword.Enabled = login;
+            fldUsername.Caption = rbAuth.SelectedItem == 2 ? @"DOMAIN\user" : "";
         }
         rbAuth.SelectedItemChanged += (_, _) => SyncAuth();
         SyncAuth();
@@ -246,31 +249,37 @@ public static class ConnectionPicker
             var name     = (fldName.Text     ?? "").Trim();
             var server   = (fldServer.Text   ?? "").Trim();
             var database = (fldDatabase.Text ?? "").Trim();
-            bool sql     = rbAuth.SelectedItem == 1;
+            var auth     = rbAuth.SelectedItem switch { 1 => "sql", 2 => "domain", _ => "windows" };
+            var username = (fldUsername.Text ?? "").Trim();
 
             if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(server))
             {
                 error = "Name and Server are required.";
                 return null;
             }
-            if (sql && string.IsNullOrWhiteSpace(fldUsername.Text))
+            if (auth == "sql" && username.Length == 0)
             {
                 error = "Username is required for SQL authentication.";
+                return null;
+            }
+            if (auth == "domain" && !SqlrConnection.IsDomainUser(username))
+            {
+                error = @"Domain login needs DOMAIN\user or user@domain.";
                 return null;
             }
 
             var conn = new SqlrConnection
             {
                 Name     = name, Server = server, Database = database,
-                AuthType = sql ? "sql" : "windows",
-                Username = sql ? (fldUsername.Text ?? "").Trim() : null,
+                AuthType = auth,
                 TrustServerCertificate = src?.TrustServerCertificate ?? true
             };
-            if (sql)
+            if (conn.UsesPassword)
             {
+                conn.Username = username;
                 var typed = fldPassword.Text ?? "";
                 // Blank password on edit = keep the stored one
-                conn.Secret = typed.Length > 0 || src is null || !src.IsSqlAuth ? typed : src.Secret;
+                conn.Secret = typed.Length > 0 || src is null || !src.UsesPassword ? typed : src.Secret;
             }
             return conn;
         }

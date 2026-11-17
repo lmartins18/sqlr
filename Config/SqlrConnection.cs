@@ -11,7 +11,7 @@ public class SqlrConnection
     public string Server { get; set; } = "";
     /// <summary>Initial database. Empty = the login's default database.</summary>
     public string Database { get; set; } = "";
-    /// <summary>"windows" or "sql"</summary>
+    /// <summary>"windows", "sql", or "domain" (DOMAIN\user + password over NTLM, for macOS/Linux)</summary>
     public string AuthType { get; set; } = "windows";
     public string? Username { get; set; }
 
@@ -25,6 +25,23 @@ public class SqlrConnection
 
     [JsonIgnore]
     public bool IsSqlAuth => AuthType.Equals("sql", StringComparison.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool IsDomainAuth => AuthType.Equals("domain", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>SQL and domain logins carry a username and password.</summary>
+    [JsonIgnore]
+    public bool UsesPassword => IsSqlAuth || IsDomainAuth;
+
+    [JsonIgnore]
+    public string AuthLabel => IsSqlAuth ? $"sql:{Username}" : IsDomainAuth ? $"domain:{Username}" : "windows";
+
+    /// <summary>A domain login names its domain: <c>DOMAIN\user</c> or <c>user@domain</c>.</summary>
+    public static bool IsDomainUser(string? user)
+    {
+        var i = user?.IndexOfAny(['\\', '@']) ?? -1;
+        return i > 0 && i < user!.Length - 1;
+    }
 
     /// <summary>
     /// The usable password. Setting it stores it encrypted on Windows and in plain text elsewhere.
@@ -79,15 +96,13 @@ public class SqlrConnection
         var db = database ?? Database;
         if (!string.IsNullOrWhiteSpace(db)) b.InitialCatalog = db;
 
-        if (IsSqlAuth)
+        if (UsesPassword)
         {
             b.UserID   = Username ?? "";
             b.Password = Secret ?? "";
         }
-        else
-        {
-            b.IntegratedSecurity = true;
-        }
+        // Domain = Integrated Security with an explicit user; SqlConnect signs it in with NTLM.
+        if (!IsSqlAuth) b.IntegratedSecurity = true;
 
         return b.ConnectionString;
     }
@@ -105,8 +120,7 @@ public class SqlrConnection
         {
             var nameCol  = Name.PadRight(20);
             var serverDb = $"{Server}/{DatabaseLabel}";
-            var auth     = IsSqlAuth ? $"sql:{Username}" : "windows";
-            return $"{nameCol}  {serverDb,-45}  [{auth}]";
+            return $"{nameCol}  {serverDb,-45}  [{AuthLabel}]";
         }
     }
 }

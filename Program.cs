@@ -79,7 +79,7 @@ static void ListConnections()
     Console.WriteLine(header);
     Console.WriteLine(new string('─', header.Length));
     foreach (var c in store.Connections)
-        Console.WriteLine($"{c.Name.PadRight(nameW)}  {c.Server.PadRight(serverW)}  {c.DatabaseLabel.PadRight(dbW)}  {(c.IsSqlAuth ? $"sql ({c.Username})" : "windows")}");
+        Console.WriteLine($"{c.Name.PadRight(nameW)}  {c.Server.PadRight(serverW)}  {c.DatabaseLabel.PadRight(dbW)}  {c.AuthLabel}");
 }
 
 /// <summary>Interactive add (existing == null) or edit. Returns the saved connection, or null if aborted.</summary>
@@ -112,7 +112,12 @@ static SqlrConnection? AddConnectionCli(SqlrConnection? existing)
         var name     = Prompt("Connection name : ", existing?.Name);
         var server   = Prompt("Server          : ", existing?.Server);
         var database = Prompt("Database (blank = default) : ", existing?.Database, required: false);
-        var auth     = Prompt("Auth [windows/sql] : ", existing?.AuthType ?? "windows").ToLowerInvariant() == "sql" ? "sql" : "windows";
+        var auth     = Prompt("Auth [windows/sql/domain] : ", existing?.AuthType ?? "windows").ToLowerInvariant() switch
+        {
+            "sql"    => "sql",
+            "domain" => "domain",
+            _        => "windows"
+        };
 
         var conn = new SqlrConnection
         {
@@ -120,12 +125,17 @@ static SqlrConnection? AddConnectionCli(SqlrConnection? existing)
             TrustServerCertificate = existing?.TrustServerCertificate ?? true
         };
 
-        if (auth == "sql")
+        if (conn.UsesPassword)
         {
-            conn.Username = Prompt("Username : ", existing?.Username);
-            Console.Write(existing?.IsSqlAuth == true ? "Password (blank = unchanged) : " : "Password : ");
+            while (true)
+            {
+                conn.Username = Prompt(conn.IsDomainAuth ? @"Username (DOMAIN\user) : " : "Username : ", existing?.Username);
+                if (!conn.IsDomainAuth || SqlrConnection.IsDomainUser(conn.Username)) break;
+                Console.Error.WriteLine(@"  (use DOMAIN\user or user@domain)");
+            }
+            Console.Write(existing?.UsesPassword == true ? "Password (blank = unchanged) : " : "Password : ");
             var pw = ReadSecret();
-            conn.Secret = pw.Length == 0 && existing?.IsSqlAuth == true ? existing.Secret : pw;
+            conn.Secret = pw.Length == 0 && existing?.UsesPassword == true ? existing.Secret : pw;
         }
 
         var store   = ConnectionStore.Load();

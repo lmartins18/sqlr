@@ -80,36 +80,40 @@ public static class SqlSyntaxHighlighter
 
     public static void Attach(TextView tv)
     {
-        T[][] map  = [];
-        string? cached = null;
+        T[][] map   = [];
+        bool  dirty = true;
+
+        // Re-tokenize at most once per change (not once per drawn cell).
+        tv.ContentsChanged += (_, _) => dirty = true;
+        tv.TextChanged     += (_, _) => dirty = true;
 
         tv.DrawNormalColor += (_, e) =>
         {
-            var text = tv.Text ?? "";
-            // Rebuild lazily on text change (reference compare is fast)
-            if (!ReferenceEquals(text, cached))
+            if (dirty)
             {
-                cached = text;
-                map    = BuildMap(text);
+                map   = BuildMap(tv.Text ?? "");
+                dirty = false;
             }
 
-            // DrawNormalColor fires once per LINE — e.Line contains all cells for the line.
-            // We must set Cell.Attribute on each cell individually (Cell is a value type).
-            int row = e.UnwrappedPosition.Item1;
+            // DrawNormalColor fires once per CELL: e.Col indexes the cell in e.Line, and
+            // UnwrappedPosition is its (row, col) in the unwrapped text.
+            var (row, col) = e.UnwrappedPosition;
             if (row < 0 || row >= map.Length) return;
 
             var rowMap = map[row];
-            for (int col = 0; col < e.Line.Count; col++)
-            {
-                if (col >= rowMap.Length) break;
-                var cell = e.Line[col];
-                cell.Attribute = ColorFor(rowMap[col]);
-                e.Line[col] = cell;
-            }
+            if (col < 0 || col >= rowMap.Length || e.Col < 0 || e.Col >= e.Line.Count) return;
+
+            var cell = e.Line[e.Col];
+            cell.Attribute = ColorFor(rowMap[col]);
+            e.Line[e.Col]  = cell;
         };
     }
 
     // ── Tokenizer ──────────────────────────────────────────────────────────
+
+    /// <summary>Token kind name per character, per line (exposed for tests).</summary>
+    internal static string[][] Classify(string text) =>
+        BuildMap(text).Select(line => line.Select(k => k.ToString()).ToArray()).ToArray();
 
     private static T[][] BuildMap(string text)
     {
@@ -120,13 +124,14 @@ public static class SqlSyntaxHighlighter
         {
             char c = text[i];
 
-            // ── Block comment  /* ... */ ───────────────────────────────────
+            // ── Block comment  /* ... */ (nestable in T-SQL) ──────────────
             if (c == '/' && Peek(text, i + 1) == '*')
             {
-                int s = i; i += 2;
+                int s = i, depth = 0;
                 while (i < text.Length)
                 {
-                    if (text[i] == '*' && Peek(text, i + 1) == '/') { i += 2; break; }
+                    if (text[i] == '/' && Peek(text, i + 1) == '*') { depth++; i += 2; continue; }
+                    if (text[i] == '*' && Peek(text, i + 1) == '/') { depth--; i += 2; if (depth == 0) break; continue; }
                     i++;
                 }
                 Fill(flat, s, i, T.Comment);
@@ -160,13 +165,29 @@ public static class SqlSyntaxHighlighter
             if (c == '@')
             {
                 int s = i++;
-                while (i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_')) i++;
+                while (i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_' || text[i] == '@')) i++;
                 Fill(flat, s, i, T.AtVar);
                 continue;
             }
 
+            // ── N'unicode string' ─────────────────────────────────────────
+            if ((c == 'N' || c == 'n') && Peek(text, i + 1) == '\'' && (i == 0 || !IsIdentChar(text[i - 1])))
+            {
+                flat[i++] = T.StringLit;
+                continue;
+            }
+
+            // ── Hex literal 0x1F ──────────────────────────────────────────
+            if (c == '0' && (Peek(text, i + 1) == 'x' || Peek(text, i + 1) == 'X') && (i == 0 || !IsIdentChar(text[i - 1])))
+            {
+                int s = i; i += 2;
+                while (i < text.Length && char.IsAsciiHexDigit(text[i])) i++;
+                Fill(flat, s, i, T.Number);
+                continue;
+            }
+
             // ── Number literal ────────────────────────────────────────────
-            if (char.IsDigit(c) && (i == 0 || !char.IsLetterOrDigit(text[i - 1])))
+            if (char.IsDigit(c) && (i == 0 || !IsIdentChar(text[i - 1])))
             {
                 int s = i;
                 bool hasDot = false;
@@ -184,7 +205,7 @@ public static class SqlSyntaxHighlighter
             if (char.IsLetter(c) || c == '_' || c == '#')
             {
                 int s = i;
-                while (i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_')) i++;
+                while (i < text.Length && IsIdentChar(text[i])) i++;
                 var word = text[s..i];
                 var kind = ClassifyWord(word);
                 Fill(flat, s, i, kind);
@@ -195,8 +216,12 @@ public static class SqlSyntaxHighlighter
             if (c == '[')
             {
                 int s = i++;
-                while (i < text.Length && text[i] != ']') i++;
-                if (i < text.Length) i++; // consume ']'
+                while (i < text.Length)
+                {
+                    if (text[i] == ']' && Peek(text, i + 1) == ']') { i += 2; continue; }
+                    if (text[i] == ']') { i++; break; }
+                    i++;
+                }
                 Fill(flat, s, i, T.Default);
                 continue;
             }
@@ -219,6 +244,9 @@ public static class SqlSyntaxHighlighter
     private static char Peek(string s, int idx) => idx < s.Length ? s[idx] : '\0';
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsIdentChar(char c) => char.IsLetterOrDigit(c) || c == '_' || c == '#' || c == '$';
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Fill(T[] arr, int from, int to, T kind)
     {
         for (int j = from; j < to; j++) arr[j] = kind;
@@ -230,18 +258,24 @@ public static class SqlSyntaxHighlighter
         Functions.Contains(word)   ? T.Function :
         T.Default;
 
+    /// <summary>Splits the per-char map into lines indexed by RUNE (the TextView's column unit).</summary>
     private static T[][] FlatToLines(T[] flat, string text)
     {
         var lines = new List<T[]>();
-        int start = 0;
-        for (int j = 0; j <= flat.Length; j++)
+        var cur   = new List<T>();
+        for (int j = 0; j < flat.Length; j++)
         {
-            if (j == flat.Length || text[j] == '\n')
+            if (text[j] == '\n')
             {
-                lines.Add(flat[start..j]);
-                start = j + 1;
+                lines.Add([.. cur]);
+                cur.Clear();
+                continue;
             }
+            if (char.IsLowSurrogate(text[j]) && j > 0 && char.IsHighSurrogate(text[j - 1]))
+                continue; // second half of a surrogate pair: same rune as the previous char
+            cur.Add(flat[j]);
         }
+        lines.Add([.. cur]);
         return [.. lines];
     }
 }

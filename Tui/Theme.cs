@@ -106,6 +106,38 @@ public static class Theme
         Disabled  = new TAttr(Color.Gray,         Color.Blue)
     };
 
+    /// NULL cells — dimmed so they stand apart from real values
+    public static ColorScheme NullCell(bool evenRow) => new()
+    {
+        Normal    = new TAttr(Color.Gray,         evenRow ? Color.Black : Color.Blue),
+        Focus     = new TAttr(Color.Black,        Color.Cyan),
+        HotNormal = new TAttr(Color.Gray,         evenRow ? Color.Black : Color.Blue),
+        HotFocus  = new TAttr(Color.Black,        Color.Cyan),
+        Disabled  = new TAttr(Color.Gray,         Color.Black)
+    };
+
+    // ── Status bar states ──────────────────────────────────────────────────
+
+    public static ColorScheme StatusOk    => Solid(Color.BrightGreen);
+    public static ColorScheme StatusError => Solid(Color.BrightRed);
+    public static ColorScheme StatusBusy  => Solid(Color.Yellow);
+
+    private static ColorScheme Solid(Color fg) => new()
+    {
+        Normal    = new TAttr(fg,                 Color.Black),
+        Focus     = new TAttr(fg,                 Color.Black),
+        HotNormal = new TAttr(Color.Yellow,       Color.Black),
+        HotFocus  = new TAttr(Color.Yellow,       Color.Black),
+        Disabled  = new TAttr(Color.Gray,         Color.Black)
+    };
+
+    // ── Message pane line colours ──────────────────────────────────────────
+
+    public static readonly TAttr MessageInfo  = new(Color.White,       Color.Black);
+    public static readonly TAttr MessageRows  = new(Color.Gray,        Color.Black);
+    public static readonly TAttr MessageError = new(Color.BrightRed,   Color.Black);
+    public static readonly TAttr MessageHead  = new(Color.BrightCyan,  Color.Black);
+
     // ── Helper: apply rounded border to any View ───────────────────────────
     public static void SetRounded(View v) =>
         v.BorderStyle = LineStyle.Rounded;

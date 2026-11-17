@@ -37,12 +37,21 @@ public static class PathInstaller
 
     private static void InstallUnix(string dir)
     {
-        var exportLine = $"\nexport PATH=\"$PATH:{dir}\"";
+        var exportLine = $"\n# added by sqlr --add-to-path\nexport PATH=\"$PATH:{dir}\"\n";
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        foreach (var rc in new[] { ".bashrc", ".zshrc" })
+        // Update the rc files that exist; if none do, create the one for the current shell.
+        var candidates = new[] { ".zshrc", ".bashrc", ".bash_profile" };
+        var targets    = candidates.Where(rc => File.Exists(Path.Combine(home, rc))).ToList();
+        if (targets.Count == 0)
         {
-            var rcPath = Path.Combine(home, rc);
+            var shell = Environment.GetEnvironmentVariable("SHELL") ?? "";
+            targets.Add(shell.EndsWith("zsh") ? ".zshrc" : OperatingSystem.IsMacOS() ? ".bash_profile" : ".bashrc");
+        }
+
+        foreach (var rc in targets)
+        {
+            var rcPath  = Path.Combine(home, rc);
             var content = File.Exists(rcPath) ? File.ReadAllText(rcPath) : "";
 
             if (content.Contains(dir))
@@ -57,6 +66,6 @@ public static class PathInstaller
 
         Console.WriteLine();
         Console.WriteLine("To apply immediately, run:");
-        Console.WriteLine("  source ~/.bashrc   # or ~/.zshrc");
+        Console.WriteLine($"  source ~/{targets[0]}");
     }
 }

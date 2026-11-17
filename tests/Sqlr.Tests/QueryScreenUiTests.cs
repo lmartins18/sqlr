@@ -342,6 +342,81 @@ public sealed class QueryScreenUiTests : IDisposable
     }
 
     [Fact]
+    public void Switching_theme_recolors_the_open_screen()
+    {
+        var tokyo = Theme.Find("Tokyo-Night")!;
+        try
+        {
+            Theme.Apply(tokyo, _screen.Top);
+            Type("select 1");
+            var origin = Editor.ViewportToScreen(new Point(0, 0));
+            var cell   = Application.Driver!.Contents![origin.Y, origin.X];
+            Assert.Equal(tokyo.Keyword, cell.Attribute!.Value.Foreground);
+            Assert.Equal(tokyo.Bg, cell.Attribute!.Value.Background);
+            Assert.Equal(tokyo.TitleBg, Application.Driver.Contents[0, 0].Attribute!.Value.Background);
+            Assert.Same(Theme.Base, _screen.Top.ColorScheme);
+        }
+        finally
+        {
+            Theme.Apply(Theme.Default, _screen.Top);
+        }
+    }
+
+    [Fact]
+    public void F9_previews_themes_live_and_Esc_goes_back()
+    {
+        var seen = DriveThemePicker(Key.CursorDown, Key.CursorDown, Key.Esc);
+        Assert.Equal([Theme.All[1].Name, Theme.All[2].Name], seen);
+        Assert.Equal(Theme.Default, Theme.Current);
+        Assert.False(File.Exists(SqlrPaths.ThemeFile));
+    }
+
+    [Fact]
+    public void F9_Enter_keeps_and_saves_the_theme()
+    {
+        try
+        {
+            DriveThemePicker(Key.CursorDown, Key.Enter);
+            Assert.Equal(Theme.All[1], Theme.Current);
+            Assert.Equal(Theme.All[1].Name, File.ReadAllText(SqlrPaths.ThemeFile).Trim());
+
+            Theme.Apply(Theme.Default);
+            Theme.LoadSaved();
+            Assert.Equal(Theme.All[1], Theme.Current);
+        }
+        finally
+        {
+            File.Delete(SqlrPaths.ThemeFile);
+            Theme.Apply(Theme.Default, _screen.Top);
+        }
+    }
+
+    [Fact]
+    public void Theme_names_are_unique()
+    {
+        Assert.Equal(Theme.All.Count, Theme.All.Select(t => t.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Same(Theme.Default, Theme.All[0]);
+    }
+
+    /// <summary>Opens the F9 picker and presses <paramref name="keys"/> inside it; returns the theme active after each key but the last.</summary>
+    private List<string> DriveThemePicker(params Key[] keys)
+    {
+        var seen = new List<string>();
+        int i    = 0;
+        void OnIteration(object? sender, IterationEventArgs e)
+        {
+            if (i >= keys.Length) return;
+            if (i > 0) seen.Add(Theme.Current.Name);
+            Application.RaiseKeyDownEvent(keys[i++]);
+        }
+
+        Application.Iteration += OnIteration;
+        try { Press(Key.F9); }
+        finally { Application.Iteration -= OnIteration; }
+        return seen;
+    }
+
+    [Fact]
     public void Results_grid_loads_sorts_filters_and_copies()
     {
         var rs = new ResultSet { Columns = ["id", "name"], ColumnTypes = ["int", "nvarchar"] };

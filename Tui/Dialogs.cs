@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using Sqlr.Config;
 using Sqlr.Db;
 using Terminal.Gui;
 
@@ -265,6 +266,70 @@ internal static class Dialogs
         return result;
     }
 
+    // ── Theme picker (F9) ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Lists the themes, each row drawn in its own colours. Moving previews the theme on the
+    /// whole screen; Enter keeps and saves it, Esc goes back to the previous one.
+    /// </summary>
+    public static void PickTheme()
+    {
+        var before  = Theme.Current;
+        var themes  = Theme.All;
+        var screen  = Application.Top; // the screen behind the dialog, recoloured along with it
+        Palette? chosen = null;
+        int nameW   = themes.Max(t => t.Name.Length);
+
+        var dlg = new Dialog
+        {
+            Title       = " theme   ↑↓ preview · Enter keep · Esc cancel ",
+            Width       = Math.Max(52, nameW + themes.Max(t => t.Description.Length) + 12),
+            Height      = themes.Count + 3,
+            ColorScheme = Theme.Base
+        };
+        Theme.SetRounded(dlg);
+
+        var list = new ListView
+        {
+            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(),
+            ColorScheme = Theme.Picker
+        };
+        list.SetSource(new ObservableCollection<string>(
+            themes.Select(t => $" {(t == before ? "●" : " ")} {t.Name.PadRight(nameW)}   {t.Description}")));
+        list.RowRender += (_, e) =>
+        {
+            if (e.Row < 0 || e.Row >= themes.Count) return;
+            var t = themes[e.Row];
+            e.RowAttribute = e.Row == list.SelectedItem ? new Terminal.Gui.Attribute(t.HiFg, t.Hi) : new Terminal.Gui.Attribute(t.Accent, t.Bg);
+        };
+        list.SelectedItemChanged += (_, e) =>
+        {
+            if (e.Item >= 0 && e.Item < themes.Count && themes[e.Item] != Theme.Current)
+                Theme.Apply(themes[e.Item], screen, dlg);
+        };
+        list.OpenSelectedItem += (_, e) =>
+        {
+            if (e.Item < 0 || e.Item >= themes.Count) return;
+            chosen = themes[e.Item];
+            Application.RequestStop(dlg);
+        };
+
+        dlg.Add(list);
+        list.SelectedItem = Math.Max(0, themes.ToList().IndexOf(before));
+        list.SetFocus();
+        Application.Run(dlg);
+        dlg.Dispose();
+
+        if (chosen is null)
+        {
+            Theme.Apply(before, screen);
+            return;
+        }
+        Theme.Apply(chosen, screen);
+        try { Theme.Save(chosen); }
+        catch (Exception ex) { SqlrPaths.LogError(ex); }
+    }
+
     // ── Object structure (F12) ─────────────────────────────────────────────
 
     public static void ShowStructure(ObjectDescription d)
@@ -380,7 +445,8 @@ internal static class Dialogs
 
         ANYWHERE
           F1  this help        F2  clear results     F3  query history
-          F4  object explorer  F8  resize panes      F10 switch connection
+          F4  object explorer  F8  resize panes      F9  colour theme (live preview)
+          F10 switch connection
           F12 peek the table / view / procedure under the cursor (works on aliases)
           Ctrl+Q  quit (your editor text is kept as a draft for next time)
 
@@ -388,5 +454,6 @@ internal static class Dialogs
           connections.json   saved connections (passwords DPAPI-encrypted on Windows)
           history.jsonl      query history          drafts/   editor text per connection
           settings.json      { "maxRows": 100000, "queryTimeoutSeconds": 0, "maxColumnWidth": 60 }
+          theme              the theme picked with F9
         """;
 }

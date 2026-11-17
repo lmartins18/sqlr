@@ -19,6 +19,7 @@ public static class SqlrPaths
     public static string History     => Path.Combine(Root, "history.jsonl");
     public static string Drafts      => Path.Combine(Root, "drafts");
     public static string ErrorLog    => Path.Combine(Root, "error.log");
+    public static string ThemeFile   => Path.Combine(Root, "theme");
 
     public static void EnsureRoot()
     {

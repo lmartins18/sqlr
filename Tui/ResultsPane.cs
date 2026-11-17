@@ -18,14 +18,14 @@ internal sealed class ResultsPane
 
           F5  run script (or selection)      F6  run block under cursor
           F3  history     F4  objects        F12 peek table / proc
-          F1  all keys    Esc cancel query   Ctrl+Q quit
+          F1  all keys    F9  theme          Esc cancel · Ctrl+Q quit
 
           Results:  Enter view cell · c/r/a copy · / filter · s sort · e export
         """;
 
     private readonly int _maxColumnWidth;
     private ExecutionResult? _result;
-    private List<TAttr> _messageLineColors = [];
+    private List<Theme.Msg> _messageLineColors = []; // resolved at draw time so a theme switch recolours them
     private List<int?>  _messageLineTargets = []; // editor line each displayed row points at
     private int _active; // 0..n-1 = result sets, n = messages
 
@@ -72,7 +72,7 @@ internal sealed class ResultsPane
             var row = e.UnwrappedPosition.Item1;
             if (row < 0 || row >= _messageLineColors.Count || e.Col < 0 || e.Col >= e.Line.Count) return;
             var cell = e.Line[e.Col];
-            cell.Attribute = _messageLineColors[row];
+            cell.Attribute = Theme.Message(_messageLineColors[row]);
             e.Line[e.Col]  = cell;
         };
 
@@ -175,11 +175,11 @@ internal sealed class ResultsPane
     private void BuildMessages(ExecutionResult r)
     {
         var lines   = new List<string>();
-        var colors  = new List<TAttr>();
+        var colors  = new List<Theme.Msg>();
         var targets = new List<int?>();
         int width   = Math.Max(20, (Messages.Viewport.Width > 0 ? Messages.Viewport.Width : Application.Screen.Width - 4) - 1);
 
-        void Add(string text, TAttr color, int? target = null)
+        void Add(string text, Theme.Msg color, int? target = null)
         {
             foreach (var raw in text.Split('\n'))
             {
@@ -202,24 +202,24 @@ internal sealed class ResultsPane
             }
         }
 
-        Add($"[{DateTime.Now:HH:mm:ss}]  {(r.Cancelled ? "cancelled" : r.HasErrors ? "finished with errors" : "completed")} in {Fmt.Elapsed(r.Elapsed)}", Theme.MessageHead);
-        Add("", Theme.MessageInfo);
+        Add($"[{DateTime.Now:HH:mm:ss}]  {(r.Cancelled ? "cancelled" : r.HasErrors ? "finished with errors" : "completed")} in {Fmt.Elapsed(r.Elapsed)}", Theme.Msg.Head);
+        Add("", Theme.Msg.Info);
         foreach (var m in r.Messages)
         {
             Add(m.Text, m.Kind switch
             {
-                MessageKind.Error        => Theme.MessageError,
-                MessageKind.RowsAffected => Theme.MessageRows,
-                _                        => Theme.MessageInfo
+                MessageKind.Error        => Theme.Msg.Error,
+                MessageKind.RowsAffected => Theme.Msg.Rows,
+                _                        => Theme.Msg.Info
             }, m.Line);
         }
         foreach (var rs in r.ResultSets.Where(rs => rs.Truncated))
-            Add($"Note: a result set was capped at {rs.Rows.Count:N0} rows; {rs.SkippedRows:N0} more were skipped (raise maxRows in ~/.sqlr/settings.json).", Theme.MessageError);
+            Add($"Note: a result set was capped at {rs.Rows.Count:N0} rows; {rs.SkippedRows:N0} more were skipped (raise maxRows in ~/.sqlr/settings.json).", Theme.Msg.Error);
 
         if (r.ErrorLine is int line)
         {
-            Add("", Theme.MessageInfo);
-            Add($"Enter on an error line jumps to it in the editor (first error: line {line}).", Theme.MessageRows);
+            Add("", Theme.Msg.Info);
+            Add($"Enter on an error line jumps to it in the editor (first error: line {line}).", Theme.Msg.Rows);
         }
 
         _messageLineColors  = colors;

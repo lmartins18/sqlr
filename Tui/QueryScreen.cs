@@ -225,6 +225,7 @@ public sealed class QueryScreen
         else if (kc == KeyCode.F7)                                   _results.Cycle(+1);
         else if (kc == (KeyCode.F7 | KeyCode.ShiftMask))             _results.Cycle(-1);
         else if (kc == KeyCode.F8)                                   CycleSplit();
+        else if (kc == KeyCode.F9)                                   Dialogs.PickTheme();
         else if (kc == KeyCode.F10)                                  SwitchConnection();
         else if (kc == KeyCode.F12)                                  _ = PeekAsync();
         else if (Is(k, KeyCode.Q | KeyCode.CtrlMask))                Quit();

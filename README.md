@@ -37,6 +37,7 @@ Most SQL GUIs are slow, heavy, and mouse-driven. `sqlr` gives you:
 | Files | `Ctrl+O` / `Ctrl+S` to open and save `.sql` files, or `sqlr -c name file.sql` |
 | Resilient | Lost connections are reopened automatically; long queries can be cancelled; results capped at `maxRows` without skipping later statements |
 | Connection picker | Add / edit / clone / delete / test (non-blocking) connections; switch connection with `F10` |
+| Themes | `F9`: 12 true-colour themes — classic, horizon, tokyodark, pastel-inu, tokyo-night, catppuccin, rose-pine, kanagawa, dracula, nord, gruvbox, synthwave — previewed live as you move, remembered between runs |
 | Self-contained | Single exe, no .NET runtime required on the target machine |
 
 ---
@@ -112,6 +113,7 @@ statement failed, `2` for bad arguments.
 | `A` / `E` / `C` | Add / edit / clone a connection |
 | `D` | Delete selected |
 | `T` | Test selected (result shown in the status line) |
+| `F9` | Colour theme |
 | `Q` / `Esc` | Quit |
 
 ### Editor
@@ -155,6 +157,7 @@ statement failed, `2` for bad arguments.
 | `F3` | Query history |
 | `F4` | Object explorer |
 | `F8` | Resize panes |
+| `F9` | Colour theme — `↑` `↓` preview, `Enter` keep, `Esc` back to the previous one |
 | `F10` | Switch connection |
 | `F12` | Peek the table / view / procedure (or alias) under the cursor |
 | `Ctrl+Q` | Quit (the editor text is kept as a draft) |
@@ -191,6 +194,7 @@ Everything lives in `~/.sqlr` (override with the `SQLR_HOME` environment variabl
 | `settings.json` | Optional settings (below) |
 | `history.jsonl` | Query history |
 | `drafts/<connection>.sql` | Editor text per connection |
+| `theme` | The theme picked with `F9` |
 | `error.log` | Details of any internal error |
 
 ```json

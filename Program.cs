@@ -255,6 +255,7 @@ static async Task<int> RunInteractiveAsync(string? connectionName, string? datab
 {
     var settings = SqlrSettings.Load();
     var history  = QueryHistory.Load(settings.HistorySize);
+    Theme.LoadSaved();
     string? preselect = connectionName;
     bool viaPicker = connectionName is null;
 

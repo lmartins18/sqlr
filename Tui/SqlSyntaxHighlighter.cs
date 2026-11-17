@@ -13,19 +13,23 @@ public static class SqlSyntaxHighlighter
     // ── Token kinds ────────────────────────────────────────────────────────
     private enum T : byte { Default, Keyword, DdlKeyword, Function, StringLit, Comment, Number, Operator, AtVar }
 
-    // ── Colours (btop-inspired) ────────────────────────────────────────────
-    private static TAttr ColorFor(T kind) => kind switch
+    // ── Colours (from the active theme) ────────────────────────────────────
+    private static TAttr ColorFor(T kind)
     {
-        T.Keyword    => new TAttr(Color.Yellow,        Color.Black),
-        T.DdlKeyword => new TAttr(Color.BrightMagenta, Color.Black),
-        T.Function   => new TAttr(Color.BrightCyan,    Color.Black),
-        T.StringLit  => new TAttr(Color.BrightGreen,   Color.Black),
-        T.Comment    => new TAttr(Color.Gray,           Color.Black),
-        T.Number     => new TAttr(Color.Magenta,        Color.Black),
-        T.Operator   => new TAttr(Color.Cyan,           Color.Black),
-        T.AtVar      => new TAttr(Color.BrightBlue,     Color.Black),
-        _            => new TAttr(Color.White,           Color.Black)
-    };
+        var p = Theme.Current;
+        return new TAttr(kind switch
+        {
+            T.Keyword    => p.Keyword,
+            T.DdlKeyword => p.Ddl,
+            T.Function   => p.Function,
+            T.StringLit  => p.String,
+            T.Comment    => p.Comment,
+            T.Number     => p.Number,
+            T.Operator   => p.Operator,
+            T.AtVar      => p.Variable,
+            _            => p.Fg
+        }, p.Bg);
+    }
 
     // ── Keyword sets ───────────────────────────────────────────────────────
     private static readonly HashSet<string> DmlKeywords = new(StringComparer.OrdinalIgnoreCase)

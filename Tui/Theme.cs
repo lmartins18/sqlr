@@ -1,144 +1,147 @@
+using Sqlr.Config;
 using TAttr = Terminal.Gui.Attribute;
 using Terminal.Gui;
 
 namespace Sqlr.Tui;
 
 /// <summary>
-/// btop-inspired dark theme.
-/// Deep navy/slate background, cyan/teal accents, amber highlights.
-/// All panels use rounded borders.
+/// Colour schemes for every view, built from the active <see cref="Palette"/>. F9 picks a palette
+/// (previewed live, saved to ~/.sqlr/theme). All panels use rounded borders.
 /// </summary>
 public static class Theme
 {
-    // ── Raw colours ────────────────────────────────────────────────────────
-    // Terminal.Gui's 16-colour palette mapped to the closest btop equivalents:
-    //   Black      ≈ #0f1117  (deep background)
-    //   DarkGray   ≈ #1e2433  (alternate row / panel bg)
-    //   Blue       ≈ #1a3a5c  (selection bg)
-    //   Cyan       ≈ #00aabb  (borders / labels)
-    //   BrightCyan ≈ #00e5ff  (focused borders / active title)
-    //   Yellow     ≈ #ffb000  (header / hotkey gold)
-    //   Gray       ≈ #4a5568  (dim text)
-    //   White      ≈ #e2e8f0  (normal text)
-    //   BrightGreen≈ #00e676  (success / OK)
-    //   BrightRed  ≈ #ff5252  (error)
-    //   BrightMagenta ≈ #ff80ab (highlight accent)
+    public enum Msg { Info, Rows, Error, Head }
+
+    private static Schemes _s = new(Palettes.Classic);
+
+    public static Palette Current { get; private set; } = Palettes.Classic;
+    public static Palette Default => Palettes.Classic;
+    public static IReadOnlyList<Palette> All => Palettes.All;
+
+    public static Palette? Find(string? name) =>
+        All.FirstOrDefault(p => p.Name.Equals(name?.Trim(), StringComparison.OrdinalIgnoreCase));
 
     // ── Colour schemes ─────────────────────────────────────────────────────
 
-    /// Default scheme for most panels
-    public static ColorScheme Base => new()
-    {
-        Normal    = new TAttr(Color.White,        Color.Black),
-        Focus     = new TAttr(Color.White,        Color.Blue),
-        HotNormal = new TAttr(Color.BrightCyan,   Color.Black),
-        HotFocus  = new TAttr(Color.BrightCyan,   Color.Blue),
-        Disabled  = new TAttr(Color.Gray,         Color.Black)
-    };
+    public static ColorScheme Base       => _s.Base;
+    public static ColorScheme TitleBar   => _s.TitleBar;
+    public static ColorScheme StatusBar  => _s.StatusBar;
+    public static ColorScheme Input      => _s.Input;
+    public static ColorScheme Popup      => _s.Popup;
+    public static ColorScheme Picker     => _s.Picker;
 
-    /// Title bar — full-width header strip
-    public static ColorScheme TitleBar => new()
-    {
-        Normal    = new TAttr(Color.Black,        Color.Cyan),
-        Focus     = new TAttr(Color.Black,        Color.Cyan),
-        HotNormal = new TAttr(Color.Black,        Color.Cyan),
-        HotFocus  = new TAttr(Color.Black,        Color.Cyan),
-        Disabled  = new TAttr(Color.Black,        Color.Cyan)
-    };
-
-    /// Status bar at the very bottom
-    public static ColorScheme StatusBar => new()
-    {
-        Normal    = new TAttr(Color.BrightCyan,   Color.Black),
-        Focus     = new TAttr(Color.BrightCyan,   Color.Black),
-        HotNormal = new TAttr(Color.Yellow,       Color.Black),
-        HotFocus  = new TAttr(Color.Yellow,       Color.Black),
-        Disabled  = new TAttr(Color.Gray,         Color.Black)
-    };
-
-    /// SQL input panel — cyan border when focused
-    public static ColorScheme Input => new()
-    {
-        Normal    = new TAttr(Color.White,        Color.Black),
-        Focus     = new TAttr(Color.White,        Color.Black),
-        HotNormal = new TAttr(Color.Cyan,         Color.Black),
-        HotFocus  = new TAttr(Color.BrightCyan,   Color.Black),
-        Disabled  = new TAttr(Color.Gray,         Color.Black)
-    };
-
-    /// Completion popup
-    public static ColorScheme Popup => new()
-    {
-        Normal    = new TAttr(Color.White,        Color.Black),
-        Focus     = new TAttr(Color.Black,        Color.BrightCyan),
-        HotNormal = new TAttr(Color.BrightCyan,   Color.Black),
-        HotFocus  = new TAttr(Color.Black,        Color.BrightCyan),
-        Disabled  = new TAttr(Color.Gray,         Color.Black)
-    };
-
-    /// Connection picker list
-    public static ColorScheme Picker => new()
-    {
-        Normal    = new TAttr(Color.White,        Color.Black),
-        Focus     = new TAttr(Color.Black,        Color.Cyan),
-        HotNormal = new TAttr(Color.Yellow,       Color.Black),
-        HotFocus  = new TAttr(Color.Yellow,       Color.Cyan),
-        Disabled  = new TAttr(Color.Gray,         Color.Black)
-    };
-
-    // ── TableView row colours ──────────────────────────────────────────────
-
-    public static ColorScheme OddRow => new()
-    {
-        Normal    = new TAttr(Color.White,        Color.Black),
-        Focus     = new TAttr(Color.Black,        Color.Cyan),
-        HotNormal = new TAttr(Color.Yellow,       Color.Black),
-        HotFocus  = new TAttr(Color.Yellow,       Color.Cyan),
-        Disabled  = new TAttr(Color.Gray,         Color.Black)
-    };
-
-    public static ColorScheme EvenRow => new()
-    {
-        Normal    = new TAttr(Color.White,        Color.Blue),
-        Focus     = new TAttr(Color.Black,        Color.Cyan),
-        HotNormal = new TAttr(Color.Yellow,       Color.Blue),
-        HotFocus  = new TAttr(Color.Yellow,       Color.Cyan),
-        Disabled  = new TAttr(Color.Gray,         Color.Blue)
-    };
+    // Zebra rows: index 0, 2, 4… on the background, the others on the stripe colour
+    public static ColorScheme OddRow     => _s.OddRow;
+    public static ColorScheme EvenRow    => _s.EvenRow;
 
     /// NULL cells — dimmed so they stand apart from real values
-    public static ColorScheme NullCell(bool evenRow) => new()
+    public static ColorScheme NullCell(bool evenRow) => evenRow ? _s.NullOnBg : _s.NullOnStripe;
+
+    public static ColorScheme StatusOk    => _s.StatusOk;
+    public static ColorScheme StatusError => _s.StatusError;
+    public static ColorScheme StatusBusy  => _s.StatusBusy;
+
+    public static TAttr Message(Msg kind) => new(kind switch
     {
-        Normal    = new TAttr(Color.Gray,         evenRow ? Color.Black : Color.Blue),
-        Focus     = new TAttr(Color.Black,        Color.Cyan),
-        HotNormal = new TAttr(Color.Gray,         evenRow ? Color.Black : Color.Blue),
-        HotFocus  = new TAttr(Color.Black,        Color.Cyan),
-        Disabled  = new TAttr(Color.Gray,         Color.Black)
-    };
+        Msg.Rows  => Current.Dim,
+        Msg.Error => Current.Err,
+        Msg.Head  => Current.Accent,
+        _         => Current.Fg
+    }, Current.Bg);
 
-    // ── Status bar states ──────────────────────────────────────────────────
-
-    public static ColorScheme StatusOk    => Solid(Color.BrightGreen);
-    public static ColorScheme StatusError => Solid(Color.BrightRed);
-    public static ColorScheme StatusBusy  => Solid(Color.Yellow);
-
-    private static ColorScheme Solid(Color fg) => new()
-    {
-        Normal    = new TAttr(fg,                 Color.Black),
-        Focus     = new TAttr(fg,                 Color.Black),
-        HotNormal = new TAttr(Color.Yellow,       Color.Black),
-        HotFocus  = new TAttr(Color.Yellow,       Color.Black),
-        Disabled  = new TAttr(Color.Gray,         Color.Black)
-    };
-
-    // ── Message pane line colours ──────────────────────────────────────────
-
-    public static readonly TAttr MessageInfo  = new(Color.White,       Color.Black);
-    public static readonly TAttr MessageRows  = new(Color.Gray,        Color.Black);
-    public static readonly TAttr MessageError = new(Color.BrightRed,   Color.Black);
-    public static readonly TAttr MessageHead  = new(Color.BrightCyan,  Color.Black);
-
-    // ── Helper: apply rounded border to any View ───────────────────────────
     public static void SetRounded(View v) =>
         v.BorderStyle = LineStyle.Rounded;
+
+    // ── Switching ──────────────────────────────────────────────────────────
+
+    /// <summary>Switches palette and recolours the given open views and everything inside them.</summary>
+    public static void Apply(Palette palette, params View?[] roots)
+    {
+        var old = _s;
+        Select(palette);
+
+        // Views hold the scheme instance they were given; swap each old instance for its new twin.
+        var map = new Dictionary<ColorScheme, ColorScheme>(ReferenceEqualityComparer.Instance);
+        foreach (var (from, to) in old.All.Zip(_s.All)) map[from] = to;
+
+        foreach (var root in roots.Distinct())
+            if (root is not null) Recolor(root, map);
+    }
+
+    private static void Recolor(View v, Dictionary<ColorScheme, ColorScheme> map)
+    {
+        if (v.ColorScheme is { } cs && map.TryGetValue(cs, out var next))
+            v.ColorScheme = next;
+        v.SetNeedsDraw();
+        foreach (var sub in v.Subviews) Recolor(sub, map);
+    }
+
+    private static void Select(Palette palette)
+    {
+        Current = palette;
+        _s      = new Schemes(palette);
+    }
+
+    /// <summary>Loads the theme saved by the F9 picker (call before the first screen is built).</summary>
+    public static void LoadSaved()
+    {
+        try
+        {
+            if (File.Exists(SqlrPaths.ThemeFile) && Find(File.ReadAllText(SqlrPaths.ThemeFile)) is { } p)
+                Select(p);
+        }
+        catch (Exception ex)
+        {
+            SqlrPaths.LogError(ex);
+        }
+    }
+
+    public static void Save(Palette palette) =>
+        SqlrPaths.WriteAllTextAtomic(SqlrPaths.ThemeFile, palette.Name + "\n");
+
+    // ── Scheme set for one palette ─────────────────────────────────────────
+
+    private sealed class Schemes
+    {
+        public readonly ColorScheme Base, TitleBar, StatusBar, Input, Popup, Picker, OddRow, EvenRow,
+                                    NullOnBg, NullOnStripe, StatusOk, StatusError, StatusBusy;
+
+        public Schemes(Palette p)
+        {
+            Base      = S(A(p.Fg, p.Bg), A(p.Fg, p.Sel), A(p.Accent, p.Bg), A(p.Accent, p.Sel), A(p.Dim, p.Bg));
+            TitleBar  = S(A(p.TitleFg, p.TitleBg));
+            StatusBar = S(A(p.Accent, p.Bg), A(p.Accent, p.Bg), A(p.Gold, p.Bg), A(p.Gold, p.Bg), A(p.Dim, p.Bg));
+            Input     = S(A(p.Fg, p.Bg), A(p.Fg, p.Bg), A(p.Border, p.Bg), A(p.Accent, p.Bg), A(p.Dim, p.Bg));
+            Popup     = S(A(p.Fg, p.Float), A(p.HiFg, p.Accent), A(p.Accent, p.Float), A(p.HiFg, p.Accent), A(p.Dim, p.Float));
+            Picker    = Row(p, p.Bg);
+            OddRow    = Row(p, p.Bg);
+            EvenRow   = Row(p, p.Stripe);
+            NullOnBg     = Null(p, p.Bg);
+            NullOnStripe = Null(p, p.Stripe);
+            StatusOk    = Solid(p, p.Ok);
+            StatusError = Solid(p, p.Err);
+            StatusBusy  = Solid(p, p.Gold);
+        }
+
+        public ColorScheme[] All =>
+            [Base, TitleBar, StatusBar, Input, Popup, Picker, OddRow, EvenRow, NullOnBg, NullOnStripe, StatusOk, StatusError, StatusBusy];
+
+        private static TAttr A(Color fg, Color bg) => new(fg, bg);
+
+        private static ColorScheme S(TAttr all) => S(all, all, all, all, all);
+
+        private static ColorScheme S(TAttr normal, TAttr focus, TAttr hotNormal, TAttr hotFocus, TAttr disabled) => new()
+        {
+            Normal = normal, Focus = focus, HotNormal = hotNormal, HotFocus = hotFocus, Disabled = disabled
+        };
+
+        private static ColorScheme Row(Palette p, Color bg) =>
+            S(A(p.Fg, bg), A(p.HiFg, p.Hi), A(p.Gold, bg), A(p.Gold, p.Hi), A(p.Dim, bg));
+
+        private static ColorScheme Null(Palette p, Color bg) =>
+            S(A(p.Dim, bg), A(p.HiFg, p.Hi), A(p.Dim, bg), A(p.HiFg, p.Hi), A(p.Dim, p.Bg));
+
+        private static ColorScheme Solid(Palette p, Color fg) =>
+            S(A(fg, p.Bg), A(fg, p.Bg), A(p.Gold, p.Bg), A(p.Gold, p.Bg), A(p.Dim, p.Bg));
+    }
 }

@@ -54,7 +54,7 @@ public static class ConnectionPicker
         };
         var hint = new Label
         {
-            Text        = "  Enter=Connect   A=Add   E=Edit   C=Clone   D=Delete   T=Test   Q/Esc=Quit",
+            Text        = "  Enter=Connect  A=Add  E=Edit  C=Clone  D=Delete  T=Test  F9=Theme  Q/Esc=Quit",
             X           = 0,
             Y           = Pos.AnchorEnd(1),
             Width       = Dim.Fill(),
@@ -166,6 +166,10 @@ public static class ConnectionPicker
                     });
                     break;
                 }
+
+                case KeyCode.F9:
+                    Dialogs.PickTheme();
+                    break;
 
                 case KeyCode.Q:
                 case KeyCode.Esc:

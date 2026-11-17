@@ -30,8 +30,9 @@ Most SQL GUIs are slow, heavy, and mouse-driven. `sqlr` gives you:
 | Errors | Shown in the Messages tab with the **editor** line number; the cursor jumps to the failing line |
 | Cell viewer | `Enter` on a cell shows the full value (JSON / XML pretty-printed) or the whole row as name: value |
 | Copy & export | Copy cell / row / all (tab-separated → pastes into Excel); export to CSV, TSV, JSON, Markdown or SQL INSERTs |
-| Peek | `F12` on a table / view / proc / alias: columns, types, PK/FK, defaults, indexes, row count, or the definition |
-| Object explorer | `F4`: filterable list of tables, views, procs and functions; insert, `SELECT TOP 100`, or peek |
+| Peek | `F12` on a table / view / proc / alias: columns, types, PK/FK, defaults, indexes, row count, or the definition — `/` filters the columns or searches the definition (`n` / `N`) |
+| Object explorer | `F4`: databases › schemas › objects (opens on `dbo`), vim-style `h`/`l` navigation, live structure preview, `Ctrl+F` find, filter by type, sort by name / type / modified; insert, `SELECT TOP 100`, or peek |
+| Grep | `Ctrl+G` in the explorer: plain-text search through every proc / view / function / trigger definition and column name — "where is this column used?" — opening the definition on the matching line |
 | History | `F3`: every query you've run, searchable, with timing and success; reload or re-run |
 | Drafts | The editor text is kept per connection — reconnect and carry on where you left off |
 | Files | `Ctrl+O` / `Ctrl+S` to open and save `.sql` files, or `sqlr -c name file.sql` |
@@ -147,6 +148,32 @@ statement failed, `2` for bad arguments.
 | `Enter` on an error (Messages) | Jump to that line in the editor |
 | `Esc` / `Tab` | Back to the editor |
 | Right-click | Copy the cell |
+
+### Object explorer (`F4`)
+
+Databases › schemas › objects; it opens on the current database's `dbo`. The right-hand pane previews the selection: a table's columns, keys and indexes, a view's or routine's definition, or — for a grep hit — the definition scrolled to the matching line.
+
+| Key | Action |
+|---|---|
+| `←` / `h` / `Backspace` | Up a level (objects → schemas → databases) |
+| `→` / `l` / `Enter` | Down a level; on an object, its `F12` view |
+| `Ctrl+F` or `/` | Find: filter the list as you type (`Enter` keeps it, `Esc` clears it) |
+| `Ctrl+G` | Grep: definition lines and column names containing the text (smart case; `Enter` opens the definition on that line) |
+| `t` | Filter by type: all → tables → views → functions → procs |
+| `s` | Sort: name ↑ / ↓ → type ↑ / ↓ → modified ↓ / ↑ |
+| `i` / `F5` | Insert the name into the editor / `SELECT TOP 100` |
+| `p` | Hide / show the preview pane |
+| `Ctrl+D` / `Ctrl+U` | Scroll the preview down / up |
+
+### F12 view
+
+| Key | Action |
+|---|---|
+| `/` or `Ctrl+F` | Columns: filter the rows · definition: search, highlighting every match |
+| `n` / `N` | Next / previous match |
+| `Tab` | Columns ⇄ definition |
+| `c` | Copy (the visible rows, or the definition / selection) |
+| `Esc` | Clear the search, then close |
 
 ### Anywhere
 

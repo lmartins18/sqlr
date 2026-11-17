@@ -82,10 +82,13 @@ public static class SqlSyntaxHighlighter
 
     // ── Public attach ──────────────────────────────────────────────────────
 
-    public static void Attach(TextView tv)
+    /// <param name="search">When given, every match of the term it returns is highlighted (like nvim's hlsearch).</param>
+    public static void Attach(TextView tv, Func<string?>? search = null)
     {
-        T[][] map   = [];
-        bool  dirty = true;
+        T[][]    map     = [];
+        bool[][] matches = [];
+        bool     dirty   = true;
+        string?  term    = null;
 
         // Re-tokenize at most once per change (not once per drawn cell).
         tv.ContentsChanged += (_, _) => dirty = true;
@@ -93,10 +96,14 @@ public static class SqlSyntaxHighlighter
 
         tv.DrawNormalColor += (_, e) =>
         {
-            if (dirty)
+            var wanted = search?.Invoke();
+            if (dirty || wanted != term)
             {
-                map   = BuildMap(tv.Text ?? "");
-                dirty = false;
+                var text = tv.Text ?? "";
+                if (dirty) map = BuildMap(text);
+                matches = string.IsNullOrEmpty(wanted) ? [] : MatchMap(text, wanted);
+                term    = wanted;
+                dirty   = false;
             }
 
             // DrawNormalColor fires once per CELL: e.Col indexes the cell in e.Line, and
@@ -108,9 +115,21 @@ public static class SqlSyntaxHighlighter
             if (col < 0 || col >= rowMap.Length || e.Col < 0 || e.Col >= e.Line.Count) return;
 
             var cell = e.Line[e.Col];
-            cell.Attribute = ColorFor(rowMap[col]);
+            cell.Attribute = row < matches.Length && col < matches[row].Length && matches[row][col]
+                ? new TAttr(Theme.Current.HiFg, Theme.Current.Gold)
+                : ColorFor(rowMap[col]);
             e.Line[e.Col]  = cell;
         };
+    }
+
+    /// <summary>Per line, per rune: is the cell inside a (smart-case) match of <paramref name="term"/>?</summary>
+    private static bool[][] MatchMap(string text, string term)
+    {
+        var flat = new bool[text.Length];
+        var cmp  = term.Any(char.IsUpper) ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        for (int i = text.IndexOf(term, cmp); i >= 0; i = text.IndexOf(term, i + term.Length, cmp))
+            Array.Fill(flat, true, i, term.Length);
+        return FlatToLines(flat, text);
     }
 
     // ── Tokenizer ──────────────────────────────────────────────────────────
@@ -263,10 +282,10 @@ public static class SqlSyntaxHighlighter
         T.Default;
 
     /// <summary>Splits the per-char map into lines indexed by RUNE (the TextView's column unit).</summary>
-    private static T[][] FlatToLines(T[] flat, string text)
+    private static TItem[][] FlatToLines<TItem>(TItem[] flat, string text)
     {
-        var lines = new List<T[]>();
-        var cur   = new List<T>();
+        var lines = new List<TItem[]>();
+        var cur   = new List<TItem>();
         for (int j = 0; j < flat.Length; j++)
         {
             if (text[j] == '\n')

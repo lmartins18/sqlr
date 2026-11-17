@@ -30,6 +30,8 @@ public sealed class QueryScreen
     private readonly EditorView      _editor;
     private readonly Label           _status;
     private readonly CompletionPopup _popup;
+    private readonly Dictionary<string, List<CatalogObject>> _catalogCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ObjectDescription?>  _descriptionCache = new(StringComparer.OrdinalIgnoreCase);
 
     private CancellationTokenSource? _cts;
     private Task?      _runTask;
@@ -92,6 +94,7 @@ public sealed class QueryScreen
         };
         _inputFrame.Add(_editor);
         SqlSyntaxHighlighter.Attach(_editor);
+        _title.NoHotKey();
 
         // ── Status bar ─────────────────────────────────────────────────────
         _status = new Label
@@ -101,6 +104,9 @@ public sealed class QueryScreen
             Width       = Dim.Fill(),
             ColorScheme = Theme.StatusBar
         };
+
+        _status.NoHotKey(); // database / object names in status text keep their underscores
+
 
         // ── Completion popup ── added LAST so it renders on top of everything else
         _popup = new CompletionPopup();
@@ -198,6 +204,8 @@ public sealed class QueryScreen
 
         _schema.Loaded += s => Dispatch(() =>
         {
+            _catalogCache.Clear(); // the schema changed (DDL / USE): explorer lists and previews reload on next F4
+            _descriptionCache.Clear();
             UpdateTitle();
             if (s.LoadError is not null)
                 SetStatus($"Schema partially loaded: {s.LoadError}", StatusKind.Error);
@@ -770,67 +778,37 @@ public sealed class QueryScreen
 
     // ── Object explorer (F4) ───────────────────────────────────────────────
 
-    private sealed record DbObject(string Schema, string Name, string Kind, string Quoted);
+    /// <summary>Data the explorer reads; tests replace it with fakes.</summary>
+    internal Func<ExplorerSource>? ExplorerSourceFactory { get; set; }
+
+    private ExplorerSource RealExplorerSource() => new()
+    {
+        Database    = _database,
+        Databases   = _schema.Current.Databases.Count > 0 ? _schema.Current.Databases : [_database],
+        LoadObjects = (db, ct) => ObjectCatalog.LoadAsync(_conn.BuildConnectionString(db), ct),
+        Grep        = (db, pattern, ct) => ObjectCatalog.GrepAsync(_conn.BuildConnectionString(db), pattern, ObjectCatalog.MaxGrepHits, ct),
+        Describe    = (db, schema, name, ct) => ObjectDescriber.DescribeAsync(_conn.BuildConnectionString(db), schema, name, ct),
+        Cache       = _catalogCache,
+        Descriptions = _descriptionCache
+    };
 
     private void ShowObjectExplorer()
     {
-        var s = _schema.Current;
-        if (!_schema.IsLoaded && s.Tables.Count == 0)
+        var act = ObjectExplorer.Run((ExplorerSourceFactory ?? RealExplorerSource)());
+        if (act is null) return;
+
+        var name = act.Database.Equals(_database, StringComparison.OrdinalIgnoreCase)
+            ? act.Object.QuotedFullName
+            : $"{SqlIdent.Quote(act.Database)}.{act.Object.QuotedFullName}";
+        if (act.Run)
         {
-            SetStatus("Schema is still loading — try again in a moment.", StatusKind.Busy);
+            Execute($"SELECT TOP (100) * FROM {name};", 0);
             return;
         }
-
-        var all = s.UserTables.Select(t => new DbObject(t.Schema, t.Name, t.IsView ? "view" : "table", t.QuotedFullName))
-            .Concat(s.Routines.Select(r => new DbObject(r.Schema, r.Name, r.IsProcedure ? "proc" : "function", r.QuotedFullName)))
-            .OrderBy(o => o.Schema, StringComparer.OrdinalIgnoreCase).ThenBy(o => o.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        int nameW = Math.Min(60, all.Select(o => o.Schema.Length + o.Name.Length + 1).DefaultIfEmpty(10).Max());
-
-        var picked = Dialogs.Pick(
-            $"objects in {_database} · {all.Count:N0}",
-            "Enter insert name · F5 SELECT TOP 100 · F12 structure · Esc close",
-            filter => all
-                .Where(o => MatchesAll($"{o.Schema}.{o.Name} {o.Kind}", filter))
-                .Select(o => new PickItem<DbObject>($" {($"{o.Schema}.{o.Name}").PadRight(nameW)}  {o.Kind}", o))
-                .ToList(),
-            KeyCode.F5, KeyCode.F12);
-
-        if (picked is not { } p) return;
-        var obj = p.Item;
-
-        switch (p.Key)
-        {
-            case KeyCode.F5 when obj.Kind is "table" or "view":
-                Execute($"SELECT TOP (100) * FROM {obj.Quoted};", 0);
-                break;
-            case KeyCode.F12:
-                _ = PeekObjectAsync(obj.Schema, obj.Name);
-                break;
-            default:
-                _editor.SetFocus();
-                _editor.InsertText(obj.Kind == "proc" && EditorText.TextBeforeCursor(_editor).TrimEnd().Length == 0
-                    ? $"EXEC {obj.Quoted} "
-                    : obj.Quoted);
-                break;
-        }
-    }
-
-    private async Task PeekObjectAsync(string schema, string name)
-    {
-        try
-        {
-            var desc = await ObjectDescriber.DescribeAsync(_conn.BuildConnectionString(_database), schema, name);
-            Dispatch(() =>
-            {
-                if (desc is null) SetStatus($"{schema}.{name} no longer exists.", StatusKind.Error);
-                else Dialogs.ShowStructure(desc);
-            });
-        }
-        catch (Exception ex)
-        {
-            Dispatch(() => SetStatus($"Peek failed: {ex.Message}", StatusKind.Error));
-        }
+        _editor.SetFocus();
+        _editor.InsertText(act.Object.Kind == "proc" && EditorText.TextBeforeCursor(_editor).TrimEnd().Length == 0
+            ? $"EXEC {name} "
+            : name);
     }
 
     // ── History (F3) ───────────────────────────────────────────────────────

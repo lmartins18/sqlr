@@ -49,7 +49,7 @@ public static class ObjectDescriber
             JOIN sys.schemas s ON s.schema_id = o.schema_id
             WHERE o.name = @name
               AND (@schema IS NULL OR s.name = @schema)
-              AND o.type IN ('U','V','P','PC','X','FN','IF','TF','FS','FT')
+              AND o.type IN ('U','V','P','PC','X','FN','IF','TF','FS','FT','TR')
             ORDER BY CASE WHEN s.name = SCHEMA_NAME() THEN 0 WHEN s.name = 'dbo' THEN 1 ELSE 2 END, o.is_ms_shipped, s.name
             """, conn))
         {
@@ -73,6 +73,7 @@ public static class ObjectDescriber
                 "V"                    => "View",
                 "P" or "PC" or "X"     => "Procedure",
                 "IF" or "TF" or "FT"   => "Table function",
+                "TR"                   => "Trigger",
                 _                      => "Function"
             },
             Grid = type is "U" or "V"

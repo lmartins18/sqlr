@@ -36,6 +36,19 @@ internal sealed class GridView : TableView
         (PreviewKey?.Invoke(key) ?? false) || key.Handled || base.OnKeyDown(key);
 }
 
+internal static class ViewText
+{
+    /// <summary>
+    /// Shows '_' literally in the view's text and title. Terminal.Gui treats it as a hotkey marker
+    /// by default, which turns "usp_GetBills" into "uspGetBills".
+    /// </summary>
+    public static T NoHotKey<T>(this T view) where T : View
+    {
+        view.HotKeySpecifier = (System.Text.Rune)0xFFFF;
+        return view;
+    }
+}
+
 /// <summary>A ListView whose keys can be intercepted before type-to-search.</summary>
 internal sealed class KeyListView : ListView
 {

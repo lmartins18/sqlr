@@ -42,6 +42,7 @@ internal sealed class ResultsPane
             ColorScheme = Theme.Base
         };
         Theme.SetRounded(Frame);
+        Frame.NoHotKey();
 
         Table = new GridView
         {

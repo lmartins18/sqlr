@@ -28,6 +28,7 @@ internal static class Dialogs
             ColorScheme = Theme.Base
         };
         Theme.SetRounded(dlg);
+        dlg.NoHotKey();
 
         var lbl   = new Label { Text = label, X = 1, Y = 0 };
         var field = new TextField { X = 1, Y = 1, Width = Dim.Fill(1), Text = initial, ColorScheme = Theme.Input };
@@ -61,6 +62,7 @@ internal static class Dialogs
             ColorScheme = Theme.Base
         };
         Theme.SetRounded(dlg);
+        dlg.NoHotKey();
 
         var tv = new EditorView
         {
@@ -100,6 +102,7 @@ internal static class Dialogs
             ColorScheme = Theme.Base
         };
         Theme.SetRounded(dlg);
+        dlg.NoHotKey();
 
         var tv = new EditorView
         {
@@ -210,15 +213,16 @@ internal static class Dialogs
             ColorScheme = Theme.Base
         };
         Theme.SetRounded(dlg);
+        dlg.NoHotKey();
 
         var filter = new TextField { X = 2, Y = 0, Width = Dim.Fill(1), ColorScheme = Theme.Input };
-        var count  = new Label { X = 1, Y = 1, Width = Dim.Fill(1), ColorScheme = Theme.StatusBar };
+        var count  = new Label { X = 1, Y = 1, Width = Dim.Fill(1), ColorScheme = Theme.StatusBar }.NoHotKey();
         var list   = new ListView
         {
             X = 0, Y = 2, Width = Dim.Fill(), Height = Dim.Fill(1),
             ColorScheme = Theme.Picker, CanFocus = false
         };
-        var help = new Label { Text = hint, X = 1, Y = Pos.AnchorEnd(1), Width = Dim.Fill(1), ColorScheme = Theme.StatusBar };
+        var help = new Label { Text = hint, X = 1, Y = Pos.AnchorEnd(1), Width = Dim.Fill(1), ColorScheme = Theme.StatusBar }.NoHotKey();
         dlg.Add(new Label { Text = "›", X = 0, Y = 0, ColorScheme = Theme.StatusBar }, filter, count, list, help);
 
         void Refill()
@@ -288,6 +292,7 @@ internal static class Dialogs
             ColorScheme = Theme.Base
         };
         Theme.SetRounded(dlg);
+        dlg.NoHotKey();
 
         var list = new ListView
         {
@@ -332,10 +337,20 @@ internal static class Dialogs
 
     // ── Object structure (F12) ─────────────────────────────────────────────
 
-    public static void ShowStructure(ObjectDescription d)
+    /// <summary>
+    /// The columns / parameters grid and, for views and routines, the definition (Tab switches).
+    /// "/" or Ctrl+F searches like nvim: on the grid it filters the rows; on the definition it
+    /// highlights every match and jumps to it as you type (n / N: next / previous).
+    /// </summary>
+    /// <param name="line">Open on the definition at this 1-based line (grep hits).</param>
+    /// <param name="search">Start with this search: highlighted in the definition, or filtering the grid.</param>
+    public static void ShowStructure(ObjectDescription d, int? line = null, string? search = null)
     {
-        bool hasDefinition = !string.IsNullOrEmpty(d.Definition);
-        bool showDef       = false;
+        bool    hasDefinition = !string.IsNullOrEmpty(d.Definition);
+        bool    showDef       = false;
+        bool    searching     = false;
+        string? term          = null; // definition search (highlighted)
+        int     origin        = 0;    // cursor offset when the search started (incremental search)
 
         var dlg = new Dialog
         {
@@ -344,17 +359,18 @@ internal static class Dialogs
             ColorScheme = Theme.Base
         };
         Theme.SetRounded(dlg);
+        dlg.NoHotKey();
 
         var detailLines = new List<string>(d.Details);
         if (d.AlsoIn.Count > 0)
             detailLines.Add($"Also in schema: {string.Join(", ", d.AlsoIn)} (qualify the name to peek those)");
         int detailH = Math.Min(detailLines.Count, 8);
 
+        var src  = new ResultTableSource(d.Grid);
         var grid = new GridView
         {
-            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(detailH + (detailH > 0 ? 1 : 0)),
-            ColorScheme = Theme.Base, FullRowSelect = true, MultiSelect = false,
-            Table = new ResultTableSource(d.Grid)
+            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(detailH + (detailH > 0 ? 1 : 0) + 1),
+            ColorScheme = Theme.Base, FullRowSelect = true, MultiSelect = false, Table = src
         };
         ResultsPane.ConfigureTableStyle(grid);
 
@@ -367,23 +383,122 @@ internal static class Dialogs
 
         var definition = new EditorView
         {
-            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(),
+            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(1),
             ReadOnly = true, Text = d.Definition ?? "", ColorScheme = Theme.Input, Visible = false
         };
-        SqlSyntaxHighlighter.Attach(definition);
+        SqlSyntaxHighlighter.Attach(definition, () => term);
 
-        dlg.Add(grid, details, definition);
+        // Bottom line: hints, or the "/" search field while searching (nvim's command line).
+        var status = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), ColorScheme = Theme.StatusBar }.NoHotKey();
+        var slash  = new Label { Text = "/", X = 0, Y = Pos.AnchorEnd(1), ColorScheme = Theme.StatusBar, Visible = false };
+        var field  = new TextField { X = 1, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), ColorScheme = Theme.Input, Visible = false };
+
+        dlg.Add(grid, details, definition, status, slash, field);
+
+        List<int> Matches()
+        {
+            var text = definition.Text ?? "";
+            var list = new List<int>();
+            if (string.IsNullOrEmpty(term)) return list;
+            var cmp = term.Any(char.IsUpper) ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            for (int i = text.IndexOf(term, cmp); i >= 0; i = text.IndexOf(term, i + term.Length, cmp))
+                list.Add(i);
+            return list;
+        }
+
+        // Moves to the next (dir 1) / previous (dir -1) match after `from`, wrapping around.
+        void Jump(int dir, int from, bool inclusive)
+        {
+            var m = Matches();
+            if (m.Count == 0) return;
+            int target = dir > 0
+                ? m.FirstOrDefault(o => inclusive ? o >= from : o > from, m[0])
+                : m.LastOrDefault(o => o < from, m[^1]);
+            var (r, c) = EditorText.ToRowCol(definition.Text ?? "", target);
+            EditorText.MoveCursor(definition, r, c);
+        }
+
+        void UpdateStatus()
+        {
+            string text;
+            if (searching)
+                text = "";
+            else if (showDef)
+            {
+                var m = Matches();
+                int at = m.IndexOf(m.FirstOrDefault(o => o >= EditorText.LinearCursor(definition), -1)) + 1;
+                text = term is null
+                    ? $" / search   {(hasDefinition ? "Tab columns   " : "")}c copy   Esc close"
+                    : $" \"{term}\"  {(m.Count == 0 ? "no matches" : $"{at}/{m.Count}")}   n/N next/prev   / new search   Esc clear";
+            }
+            else
+            {
+                text = src.Filter is null
+                    ? $" / filter   {(hasDefinition ? "Tab definition   " : "")}c copy   Esc close"
+                    : $" filter \"{src.Filter}\" → {src.Rows} of {d.Grid.Rows.Count} rows   / change   Esc clear";
+            }
+            status.Text    = text;
+            status.Visible = !searching;
+            slash.Visible  = field.Visible = searching;
+            dlg.SetNeedsDraw();
+        }
 
         void Refresh()
         {
-            var tabHint = hasDefinition ? (showDef ? "   Tab=columns" : "   Tab=definition") : "";
-            dlg.Title = $" {d.Kind}: {d.FullName} · {Fmt.Plural(d.Grid.Rows.Count, d.Grid.Columns[0] == "Parameter" ? "parameter" : "column")}{tabHint}   c=copy  Esc=close ";
+            dlg.Title          = $" {d.Kind}: {d.FullName} · {Fmt.Plural(d.Grid.Rows.Count, d.Grid.Columns[0] == "Parameter" ? "parameter" : "column")} ";
             grid.Visible       = !showDef;
             details.Visible    = !showDef && detailH > 0;
             definition.Visible = showDef;
             (showDef ? (View)definition : grid).SetFocus();
-            dlg.SetNeedsDraw();
+            UpdateStatus();
         }
+
+        void ApplyGridFilter(string? f)
+        {
+            src.ApplyFilter(f);
+            grid.Update();
+            grid.SelectedRow = 0;
+            grid.SetNeedsDraw();
+        }
+
+        void StartSearch()
+        {
+            searching  = true;
+            origin     = EditorText.LinearCursor(definition);
+            field.Text = showDef ? term ?? "" : src.Filter ?? "";
+            UpdateStatus();
+            field.SetFocus();
+            field.CursorPosition = field.Text.Length;
+        }
+
+        void EndSearch(bool keep)
+        {
+            searching = false;
+            if (!keep)
+            {
+                if (showDef) { term = null; definition.SetNeedsDraw(); }
+                else ApplyGridFilter(null);
+            }
+            Refresh();
+        }
+
+        field.TextChanged += (_, _) =>
+        {
+            if (!searching) return;
+            var text = field.Text ?? "";
+            if (showDef)
+            {
+                term = text.Length == 0 ? null : text;
+                Jump(1, origin, inclusive: true);
+                definition.SetNeedsDraw();
+            }
+            else ApplyGridFilter(text);
+        };
+        field.KeyDown += (_, k) =>
+        {
+            if (k.KeyCode == KeyCode.Enter) { EndSearch(keep: true);  k.Handled = true; }
+            else if (k.KeyCode == KeyCode.Esc) { EndSearch(keep: false); k.Handled = true; }
+        };
 
         bool OnKey(Key k)
         {
@@ -393,23 +508,59 @@ internal static class Dialogs
                 Refresh();
                 return true;
             }
+            if (k.AsRune.Value == '/' || k.KeyCode == (KeyCode.F | KeyCode.CtrlMask))
+            {
+                StartSearch();
+                return true;
+            }
+            if (showDef && term is not null && (k.KeyCode == KeyCode.N || k.KeyCode == (KeyCode.N | KeyCode.ShiftMask)))
+            {
+                bool back = k.IsShift;
+                Jump(back ? -1 : 1, EditorText.LinearCursor(definition), inclusive: false);
+                UpdateStatus();
+                return true;
+            }
+            if (k.KeyCode == KeyCode.Esc && (showDef ? term is not null : src.Filter is not null))
+            {
+                EndSearch(keep: false); // first Esc clears the search, the next one closes
+                return true;
+            }
             if (k.KeyCode == KeyCode.C)
             {
                 var text = showDef
                     ? (definition.SelectedLength > 0 ? definition.SelectedText : d.Definition ?? "")
-                    : ResultExport.Write(ExportFormat.Tsv, d.Grid);
+                    : ResultExport.Write(ExportFormat.Tsv, d.Grid, src.VisibleRows);
                 ClipboardHelper.Copy(text);
-                dlg.Title = $" ✓ copied {(showDef ? "definition" : "columns")}   Esc=close ";
+                status.Text = $" ✓ copied {(showDef ? "definition" : $"{Fmt.Plural(src.Rows, "row")}")}";
                 return true;
             }
             return false;
         }
         grid.PreviewKey       = OnKey;
         definition.PreviewKey = OnKey;
+        definition.UnwrappedCursorPosition += (_, _) => { if (!searching && term is not null) UpdateStatus(); };
 
         // Procedures / functions: the definition is the interesting part — open on it.
-        showDef = hasDefinition && d.Grid.Rows.Count == 0;
+        showDef = hasDefinition && (line is not null || d.Grid.Rows.Count == 0);
+        if (!string.IsNullOrEmpty(search))
+        {
+            if (showDef) term = search;
+            else ApplyGridFilter(search);
+        }
         Refresh();
+
+        // Position the cursor once the dialog has a size, so the TextView can scroll to it.
+        dlg.Ready += (_, _) =>
+        {
+            if (!showDef || line is not int ln) return;
+            var text = definition.Text ?? "";
+            int start = EditorText.ToLinear(text, Math.Max(0, ln - 1), 0);
+            Jump(1, start, inclusive: true);
+            if (term is null || EditorText.ToRowCol(text, EditorText.LinearCursor(definition)).Row != ln - 1)
+                EditorText.MoveCursor(definition, ln - 1, 0);
+            UpdateStatus();
+        };
+
         Application.Run(dlg);
         dlg.Dispose();
     }
@@ -442,6 +593,18 @@ internal static class Dialogs
           F7 / Shift+F7        Next / previous result set · messages
           Esc / Tab            Back to the editor
           right-click          Copy the cell
+
+        OBJECT EXPLORER (F4)   databases › schemas › objects, opens on dbo; the selection previews on the right
+          ←/h  →/l/Enter       Up a level / down a level (on an object: its F12 view)
+          Ctrl+F or /          Find: filter the list as you type (Enter keeps it, Esc clears)
+          Ctrl+G               Grep: plain text in every definition + column name (Enter opens the line)
+          t / s                Filter by type / sort (name, type, modified — each ↑ and ↓)
+          i / F5               Insert the name into the editor / SELECT TOP 100
+          p · Ctrl+D / Ctrl+U  Hide / show the preview on the right · scroll it
+
+        F12 VIEW
+          / or Ctrl+F          Filter the columns, or search the definition (n / N next / previous)
+          Tab · c · Esc        Columns ⇄ definition · copy · clear search, then close
 
         ANYWHERE
           F1  this help        F2  clear results     F3  query history

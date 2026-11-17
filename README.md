@@ -31,7 +31,7 @@ Most SQL GUIs are slow, heavy, and mouse-driven. `sqlr` gives you:
 | Cell viewer | `Enter` on a cell shows the full value (JSON / XML pretty-printed) or the whole row as name: value |
 | Copy & export | Copy cell / row / all (tab-separated → pastes into Excel); export to CSV, TSV, JSON, Markdown or SQL INSERTs |
 | Peek | `F12` on a table / view / proc / alias: columns, types, PK/FK, defaults, indexes, row count, or the definition — `/` filters the columns or searches the definition (`n` / `N`) |
-| Object explorer | `F4`: databases › schemas › objects (opens on `dbo`), vim-style `h`/`l` navigation, live structure preview, `Ctrl+F` find, filter by type, sort by name / type / modified; insert, `SELECT TOP 100`, or peek |
+| Object explorer | `F4`: databases › schemas › objects (opens on `dbo`), vim-style `h`/`l` navigation, live structure preview, `Ctrl+F` find, filter by type, sort by name / type / modified; insert, `SELECT TOP 1000` into the editor, or peek |
 | Grep | `Ctrl+G` in the explorer: plain-text search through every proc / view / function / trigger definition and column name — "where is this column used?" — opening the definition on the matching line |
 | History | `F3`: every query you've run, searchable, with timing and success; reload or re-run |
 | Drafts | The editor text is kept per connection — reconnect and carry on where you left off |
@@ -161,7 +161,9 @@ Databases › schemas › objects; it opens on the current database's `dbo`. The
 | `Ctrl+G` | Grep: definition lines and column names containing the text (smart case; `Enter` opens the definition on that line) |
 | `t` | Filter by type: all → tables → views → functions → procs |
 | `s` | Sort: name ↑ / ↓ → type ↑ / ↓ → modified ↓ / ↑ |
-| `i` / `F5` | Insert the name into the editor / `SELECT TOP 100` |
+| `i` | Insert the name into the editor |
+| `r` | Table / view: write `SELECT TOP (1000) * FROM …` below the editor text and run it; back in the editor (`Esc`) the cursor sits at its end, ready for a `WHERE` and `F6` |
+| `F5` | Table / view: `SELECT TOP (100)` into the results, leaving the editor alone |
 | `p` | Hide / show the preview pane |
 | `Ctrl+D` / `Ctrl+U` | Scroll the preview down / up |
 

@@ -24,8 +24,18 @@ internal sealed class ExplorerSource
     public static string DescriptionKey(string db, string schema, string name) => $"{db}\u0001{schema}\u0001{name}";
 }
 
-/// <summary>What the query screen should do once the explorer closes.</summary>
-internal sealed record ExplorerAction(CatalogObject Object, string Database, bool Run);
+/// <summary>What the query screen should do with the object once the explorer closes.</summary>
+internal enum ExplorerVerb
+{
+    /// <summary>Insert the name at the cursor.</summary>
+    Insert,
+    /// <summary>Show <c>SELECT TOP (100)</c> in the results, leaving the editor alone.</summary>
+    Top100,
+    /// <summary>Write <c>SELECT TOP (1000)</c> into the editor and run it.</summary>
+    Top1000
+}
+
+internal sealed record ExplorerAction(CatalogObject Object, string Database, ExplorerVerb Verb);
 
 /// <summary>
 /// F4 object explorer: databases › schemas › objects, opening on the session database's dbo.
@@ -353,7 +363,7 @@ internal sealed class ObjectExplorer
             Mode.Find => " type to filter · ↑↓ move · Enter done · Esc clear",
             Mode.Grep => " text in definitions & column names · ↑↓ move · Enter open · Esc back",
             _ => _level == Level.Objects
-                ? " ← up · → peek · ^F find · ^G grep · t type · s sort · i insert · F5 top 100 · p preview · ^D/^U scroll"
+                ? " ← up · → peek · ^F find · ^G grep · t type · s sort · i insert · r top 1000 · F5 top 100 · p preview · ^D/^U scroll"
                 : " ← up · → open · ^F find · ^G grep · p preview · Esc close"
         };
         Dialog.Title = _mode == Mode.Grep ? " grep " : " objects ";
@@ -781,10 +791,15 @@ internal sealed class ObjectExplorer
             Refresh();
             return true;
         }
-        if (Selected is CatalogObject o && (IsChar(k, 'i') || kc == KeyCode.F5))
+        if (Selected is CatalogObject o)
         {
-            if (kc == KeyCode.F5 && o.Kind is not ("table" or "view")) return true;
-            _action = new ExplorerAction(o, _db, Run: kc == KeyCode.F5);
+            ExplorerVerb? verb = IsChar(k, 'i') ? ExplorerVerb.Insert
+                               : IsChar(k, 'r') ? ExplorerVerb.Top1000
+                               : kc == KeyCode.F5 ? ExplorerVerb.Top100
+                               : null;
+            if (verb is null) return false;
+            if (verb != ExplorerVerb.Insert && o.Kind is not ("table" or "view")) return true;
+            _action = new ExplorerAction(o, _db, verb.Value);
             Application.RequestStop(Dialog);
             return true;
         }

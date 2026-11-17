@@ -255,7 +255,22 @@ public sealed class ObjectExplorerTests : IDisposable
         Press(Key.CursorDown);                        // Bills
         Press(new Key('i'));
         Assert.Equal("Bills", _x.Action?.Object.Name);
-        Assert.False(_x.Action?.Run);
+        Assert.Equal(ExplorerVerb.Insert, _x.Action?.Verb);
+    }
+
+    [Fact]
+    public void R_selects_the_top_1000_of_tables_and_views_only()
+    {
+        Press(new Key('t')); Press(new Key('t')); Press(new Key('t')); Press(new Key('t')); // procs
+        Assert.Equal(["usp_GetBills"], Names);
+        Press(new Key('r'));
+        Assert.Null(_x.Action);
+
+        Press(new Key('t'));                          // all
+        Press(Key.Home); Press(Key.CursorDown);       // Bills
+        Press(new Key('r'));
+        Assert.Equal("Bills", _x.Action?.Object.Name);
+        Assert.Equal(ExplorerVerb.Top1000, _x.Action?.Verb);
     }
 
     // ── Preview pane ───────────────────────────────────────────────────────

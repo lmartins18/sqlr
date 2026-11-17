@@ -244,6 +244,38 @@ public sealed class QueryScreenUiTests : IDisposable
         Assert.StartsWith("select N'😀', CustomerId", Editor.Text);
     }
 
+    private void WaitForRun()
+    {
+        var deadline = DateTime.Now.AddSeconds(30);
+        while (_screen.IsRunning && DateTime.Now < deadline) { Thread.Sleep(50); Pump(); }
+        Assert.False(_screen.IsRunning);
+    }
+
+    [Fact]
+    public void Explorer_top_1000_goes_below_the_editor_text_and_runs()
+    {
+        Editor.Text = "select 1\n\n";
+        var customers = new CatalogObject("sales", "Customers", "table", DateTime.Now);
+        _screen.ApplyExplorerAction(new ExplorerAction(customers, "SqlrTest", ExplorerVerb.Top1000));
+
+        Assert.Equal("select 1\n\nSELECT TOP (1000) * FROM sales.Customers", Editor.Text.Replace("\r\n", "\n"));
+        Assert.Equal(2, Editor.CurrentRow);
+        Assert.True(_screen.IsRunning);
+        WaitForRun();
+    }
+
+    [Fact]
+    public void Explorer_top_1000_into_an_empty_editor_names_other_databases()
+    {
+        var bills = new CatalogObject("dbo", "Bills", "view", DateTime.Now);
+        _screen.ApplyExplorerAction(new ExplorerAction(bills, "Archive", ExplorerVerb.Top1000));
+
+        Assert.Equal("SELECT TOP (1000) * FROM Archive.dbo.Bills", Editor.Text);
+        Assert.Equal(0, Editor.CurrentRow);
+        Assert.True(_screen.IsRunning);
+        WaitForRun();
+    }
+
     [Fact]
     public void A_second_run_never_starts_while_one_is_running()
     {

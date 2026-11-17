@@ -794,21 +794,45 @@ public sealed class QueryScreen
 
     private void ShowObjectExplorer()
     {
-        var act = ObjectExplorer.Run((ExplorerSourceFactory ?? RealExplorerSource)());
-        if (act is null) return;
+        if (ObjectExplorer.Run((ExplorerSourceFactory ?? RealExplorerSource)()) is { } act)
+            ApplyExplorerAction(act);
+    }
 
+    internal void ApplyExplorerAction(ExplorerAction act)
+    {
         var name = act.Database.Equals(_database, StringComparison.OrdinalIgnoreCase)
             ? act.Object.QuotedFullName
             : $"{SqlIdent.Quote(act.Database)}.{act.Object.QuotedFullName}";
-        if (act.Run)
+        switch (act.Verb)
         {
-            Execute($"SELECT TOP (100) * FROM {name};", 0);
-            return;
+            case ExplorerVerb.Top100:
+                Execute($"SELECT TOP (100) * FROM {name};", 0);
+                break;
+            case ExplorerVerb.Top1000:
+                AppendAndRun($"SELECT TOP (1000) * FROM {name}");
+                break;
+            default:
+                _editor.SetFocus();
+                _editor.InsertText(act.Object.Kind == "proc" && EditorText.TextBeforeCursor(_editor).TrimEnd().Length == 0
+                    ? $"EXEC {name} "
+                    : name);
+                break;
         }
+    }
+
+    /// <summary>
+    /// Adds <paramref name="sql"/> below the editor text as its own block, leaves the cursor at its
+    /// end so a WHERE can follow, and runs just that block. Inserted rather than assigned so the
+    /// editor keeps its undo history and scroll position.
+    /// </summary>
+    private void AppendAndRun(string sql)
+    {
+        var text = _editor.Text ?? "";
+        var keep = text.TrimEnd().Length;
         _editor.SetFocus();
-        _editor.InsertText(act.Object.Kind == "proc" && EditorText.TextBeforeCursor(_editor).TrimEnd().Length == 0
-            ? $"EXEC {name} "
-            : name);
+        EditorText.ReplaceRange(_editor, keep, text.Length, (keep > 0 ? "\n\n" : "") + sql);
+        Drafts.Save(_conn.Name, _editor.Text ?? "");
+        Execute(sql, _editor.CurrentRow);
     }
 
     // ── History (F3) ───────────────────────────────────────────────────────

@@ -185,6 +185,8 @@ public sealed class QueryScreen
     {
         _editor.PreviewKey           = OnEditorKey;
         _editor.CharTyped           += AfterTyped;
+        _editor.Pasted += _popup.Hide;
+        _editor.Post = a => Dispatch(a);
         _results.Table.PreviewKey    = OnTableKey;
         _results.Messages.PreviewKey = OnMessagesKey;
         _top.KeyDown                += (_, k) => { if (!k.Handled) HandleGlobalKey(k); };

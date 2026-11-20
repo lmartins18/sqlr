@@ -251,6 +251,68 @@ public sealed class QueryScreenUiTests : IDisposable
         Assert.False(_screen.IsRunning);
     }
 
+    /// <summary>What a terminal does on paste: every character as a key, back to back.</summary>
+    private void PasteKeys(string text)
+    {
+        foreach (var ch in text)
+            Application.RaiseKeyDownEvent(ch switch { '\n' => Key.Enter, '\t' => Key.Tab, ' ' => Key.Space, _ => new Key(ch) });
+    }
+
+    [Fact]
+    public void A_terminal_paste_goes_in_as_plain_text_in_one_undo_step()
+    {
+        const string script = "CREATE TABLE dbo.T (\n\tId INT,\n\tName NVARCHAR(50)\n);\nSELECT * FROM Archive..Bills\n";
+        Editor.SetFocus();
+        PasteKeys(script);
+        Pump();
+
+        Assert.Equal(script, Editor.Text.Replace("\r\n", "\n")); // tabs stay text, ".." isn't expanded
+        Assert.True(Editor.HasFocus);
+        Assert.False(_screen.Popup.IsOpen);
+
+        Press(Key.Z.WithCtrl);
+        Assert.DoesNotContain("\n", Editor.Text);                 // the block goes in one step
+    }
+
+    [Fact]
+    public void A_paste_arriving_in_chunks_keeps_a_tab_at_the_start_of_a_chunk()
+    {
+        Editor.SetFocus();
+        PasteKeys("SELECT 1\n");
+        Pump();
+        PasteKeys("\tFROM t\n");
+        Pump();
+
+        Assert.Equal("SELECT 1\n\tFROM t\n", Editor.Text.Replace("\r\n", "\n"));
+        Assert.True(Editor.HasFocus);
+    }
+
+    [Fact]
+    public void Keys_queued_while_typing_still_complete_and_Tab_still_accepts()
+    {
+        Editor.SetFocus();
+        PasteKeys("select * from cust");
+        Application.RaiseKeyDownEvent(Key.Tab);
+        Pump();
+
+        Assert.Equal("select * from sales.Customers", Editor.Text);
+        Assert.True(Editor.HasFocus);
+    }
+
+    [Fact]
+    public void A_long_paste_is_quick()
+    {
+        var script = string.Concat(Enumerable.Range(0, 200).Select(i => $"    UPDATE a SET a.Col{i} = b.Value FROM dbo.Accounts a JOIN dbo.Bills b ON b.Id = a.Id;\n"));
+        Editor.SetFocus();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        PasteKeys(script);
+        Pump();
+
+        Assert.Equal(script, Editor.Text.Replace("\r\n", "\n"));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"took {sw.Elapsed}"); // was ~15 s typed key by key
+        Assert.True(EditorView.CanPasteInOneStep, "Terminal.Gui's InsertAllText is gone: pastes fall back to InsertText");
+    }
+
     [Fact]
     public void Undo_and_redo_drop_a_selection_whose_anchor_they_remove()
     {

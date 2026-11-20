@@ -5,7 +5,13 @@ using Terminal.Gui;
 
 namespace Sqlr.Tui;
 
-public enum ScreenExit { Quit, SwitchConnection }
+public enum ScreenExit
+{
+    Quit,
+    SwitchConnection,
+    /// <summary>Stopped because the same internal error kept repeating (see <see cref="QueryScreen.OnRunError"/>).</summary>
+    Failed
+}
 
 /// <summary>
 /// The main editor + results screen for one connection.
@@ -44,6 +50,7 @@ public sealed class QueryScreen
     private string     _database;
     private int        _splitIndex;
     private ScreenExit _exit = ScreenExit.Quit;
+    private readonly Queue<DateTime> _recentErrors = new();
     private bool       _deletePending;
     private bool       _popupChosen;   // user picked an item (↑↓) or asked for the list (Ctrl+Space)
 
@@ -138,16 +145,31 @@ public sealed class QueryScreen
 
     public ScreenExit Run()
     {
-        Application.Run(_top, ex =>
-        {
-            // Never let a bug in a handler kill the session (and the user's unsaved query).
-            SqlrPaths.LogError(ex);
-            SetStatus($"Internal error: {ex.Message} (details in {SqlrPaths.ErrorLog})", StatusKind.Error);
-            return true;
-        });
+        Application.Run(_top, ex => OnRunError(ex, DateTime.UtcNow));
         Shutdown();
         _top.Dispose();
         return _exit;
+    }
+
+    internal const int MaxErrorsPerSecond = 50;
+
+    /// <summary>
+    /// Logs the error and keeps the session going, so a bug in a handler doesn't cost the user their
+    /// query. When it fails on every redraw (thousands a second), returns false to end the screen
+    /// instead of spinning; Shutdown still saves the draft.
+    /// </summary>
+    internal bool OnRunError(Exception ex, DateTime now)
+    {
+        SqlrPaths.LogError(ex);
+        _recentErrors.Enqueue(now);
+        while (_recentErrors.Peek() < now.AddSeconds(-1)) _recentErrors.Dequeue();
+        if (_recentErrors.Count >= MaxErrorsPerSecond)
+        {
+            _exit = ScreenExit.Failed;
+            return false;
+        }
+        SetStatus($"Internal error: {ex.Message} (details in {SqlrPaths.ErrorLog})", StatusKind.Error);
+        return true;
     }
 
     internal void Shutdown()

@@ -15,6 +15,14 @@ internal sealed class EditorView : TextView
     /// <summary>Raised after a printable character has been inserted (cursor already advanced).</summary>
     public event Action<char>? CharTyped;
 
+    public EditorView()
+    {
+        // Undo/redo with a selection still on can leave its anchor past the end of the restored text,
+        // and Terminal.Gui then throws on every redraw. Drop the selection first.
+        AddCommand(Command.Undo, () => { IsSelecting = false; Undo(); return true; });
+        AddCommand(Command.Redo, () => { IsSelecting = false; Redo(); return true; });
+    }
+
     protected override bool OnKeyDown(Key key) =>
         (PreviewKey?.Invoke(key) ?? false) || key.Handled || base.OnKeyDown(key);
 

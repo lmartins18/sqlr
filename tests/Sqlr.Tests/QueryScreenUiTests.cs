@@ -252,6 +252,39 @@ public sealed class QueryScreenUiTests : IDisposable
     }
 
     [Fact]
+    public void Undo_and_redo_drop_a_selection_whose_anchor_they_remove()
+    {
+        Editor.SetFocus();
+        Type("select 1\nselect 2");
+        Press(Key.Home.WithShift);                    // anchored at the end of the text…
+        Press(Key.Z.WithCtrl);                        // …which the undo takes away
+
+        Assert.False(Editor.IsSelecting);
+        Assert.StartsWith("select 1\nselect", Editor.Text.Replace("\r\n", "\n"));
+        Assert.DoesNotContain("select 2", Editor.Text);
+
+        Press(Key.End);
+        Press(Key.Home.WithShift);
+        Press(Key.Y.WithCtrl);
+        Assert.False(Editor.IsSelecting);
+    }
+
+    [Fact]
+    public void An_error_on_every_redraw_ends_the_screen_instead_of_spinning()
+    {
+        var ex = new InvalidOperationException("boom");
+        var t0 = DateTime.UtcNow;
+        for (int i = 0; i < 200; i++)
+            Assert.True(_screen.OnRunError(ex, t0.AddMilliseconds(100 * i))); // now and then: carry on
+        Assert.Contains("Internal error: boom", _screen.StatusText);
+
+        var t1 = t0.AddMinutes(1);
+        int n = 0;
+        while (n < 1000 && _screen.OnRunError(ex, t1.AddMilliseconds(n))) n++;
+        Assert.Equal(QueryScreen.MaxErrorsPerSecond - 1, n);
+    }
+
+    [Fact]
     public void Explorer_top_1000_goes_below_the_editor_text_and_runs()
     {
         Editor.Text = "select 1\n\n";

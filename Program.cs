@@ -317,6 +317,11 @@ static async Task<int> RunInteractiveAsync(string? connectionName, string? datab
             Console.ReadLine();
             continue;
         }
+        if (exit == ScreenExit.Failed)
+        {
+            Console.Error.WriteLine($"sqlr stopped: the same internal error kept repeating. Your query is saved and comes back next time. Details: {SqlrPaths.ErrorLog}");
+            return 1;
+        }
         if (exit == ScreenExit.Quit) return 0;
 
         // F10 — switch connection: always via the picker from here on.

@@ -34,6 +34,7 @@ public sealed class ObjectExplorerTests : IDisposable
     ];
 
     private readonly ConcurrentQueue<Action> _dispatched = new();
+    private readonly ConcurrentQueue<string> _described = new(); // db.schema.name, as the preview / F12 asked
     private readonly ObjectExplorer _x;
     private RunState _rs;
 
@@ -52,18 +53,34 @@ public sealed class ObjectExplorerTests : IDisposable
         Application.Shutdown();
     }
 
-    private static ExplorerSource Source() => new()
+    private ExplorerSource Source() => new()
     {
         Database    = "Sales",
         Databases   = ["master", "Sales", "Archive"],
         LoadObjects = (db, _) => Task.FromResult(Catalog.TryGetValue(db, out var o) ? o : []),
-        Grep        = (_, p, _) => Task.FromResult(
-            Columns.Where(c => ObjectCatalog.Contains(c.Column, p))
-                   .Select(c => new GrepHit(c.Schema, c.Table, "column", 0, $"{c.Column}  {c.Type}", c.Column))
-                   .Concat(ObjectCatalog.MatchLines("dbo", "usp_GetBills", "proc", GetBillsDef, p))
-                   .ToList()),
-        Describe    = (_, schema, name, _) => Task.FromResult<ObjectDescription?>(Describe(schema, name))
+        LoadSearchIndex = (db, _) =>
+        {
+            _indexLoads.Enqueue(db);
+            return db == "master"
+                ? Task.FromException<SearchIndex>(new InvalidOperationException("no access"))
+                : Task.FromResult(IndexOf(db));
+        },
+        Describe    = (db, schema, name, _) =>
+        {
+            _described.Enqueue($"{db}.{schema}.{name}");
+            return Task.FromResult<ObjectDescription?>(Describe(schema, name));
+        }
     };
+
+    private readonly ConcurrentQueue<string> _indexLoads = new();
+
+    private static readonly (string Schema, string Table, string Column, string Type)[] ArchiveColumns =
+        [("old", "OldBills", "AccountId", "int")];
+
+    private static SearchIndex IndexOf(string db) => new(
+        Catalog[db].Select(o => new SearchObject(o.Schema, o.Name, o.Kind)).ToList(),
+        (db == "Sales" ? Columns : ArchiveColumns).Select(c => new SearchColumn(c.Schema, c.Table, c.Column, c.Type)).ToList(),
+        db == "Sales" ? [new SearchModule("dbo", "usp_GetBills", "proc", GetBillsDef)] : []);
 
     private static ObjectDescription Describe(string schema, string name) => name == "usp_GetBills"
         ? new ObjectDescription
@@ -247,6 +264,113 @@ public sealed class ObjectExplorerTests : IDisposable
 
         Assert.Equal(2, row);
         Assert.Contains("\"Amount\"  1/1", status);
+    }
+
+    [Fact]
+    public void Grep_finds_objects_by_name_with_or_without_the_schema()
+    {
+        Press(Key.G.WithCtrl);
+        Type("dbo.bills");
+        PumpUntil(() => !_x.Info.Contains("searching"));
+
+        Assert.Equal("dbo.Bills", Names.First());
+        Assert.Matches(@"table\s+name │", _x.Lines[0]);
+        Assert.Contains(_x.Lines, l => l.Contains("dbo.usp_GetBills") && l.Contains("4 │ FROM dbo.Bills b;"));
+
+        PumpUntil(() => _x.PreviewTitle == " table dbo.Bills ");
+        Assert.Equal(0, _x.PreviewTop);                      // a name hit previews from the top
+
+        Press(Key.Tab);
+        Press(new Key('i'));
+        Assert.Equal(("dbo", "Bills"), (_x.Action?.Object.Schema, _x.Action?.Object.Name));
+    }
+
+    [Fact]
+    public void Name_matches_take_the_name_or_a_qualified_name_with_smart_case()
+    {
+        GrepHit? Match(string pattern) => ObjectCatalog.MatchName("EDI", "NimoPricingGroups", "table", pattern, "CMaster");
+
+        Assert.NotNull(Match("NimoPricingGroups"));
+        Assert.NotNull(Match("EDI.NimoPricingGroups"));
+        Assert.NotNull(Match("CMaster.EDI.NimoPricingGroups"));
+        Assert.NotNull(Match("[CMaster].[EDI].[NimoPricingGroups]"));   // pasted from SSMS
+        Assert.NotNull(Match("cmaster.edi.nimo"));
+        Assert.Null(Match("nimoPricing"));                              // a capital: exact case
+        Assert.Null(Match("EDI"));                                      // no dot: the name alone, not every EDI object
+        Assert.Null(Match("Billing.EDI.NimoPricingGroups"));
+        Assert.True(Match("Nimo")!.IsName);
+    }
+
+    [Fact]
+    public void A_database_is_read_once_while_you_type()
+    {
+        Press(Key.G.WithCtrl);
+        Type("acc");
+        PumpUntil(() => !_x.Info.Contains("searching"));
+        Type("ountid");
+        PumpUntil(() => !_x.Info.Contains("searching"));
+
+        Assert.Contains("3 matches in 3 objects", _x.Info);
+        Assert.Equal(["Sales"], _indexLoads);
+    }
+
+    [Fact]
+    public void Grep_from_the_database_list_takes_a_database_qualified_name()
+    {
+        Press(Key.CursorLeft); Press(Key.CursorLeft);
+        Press(Key.G.WithCtrl);
+        Type("Archive.old.OldBills");
+        PumpUntil(() => !_x.Info.Contains("searching"));
+
+        Assert.Equal(["Archive.old.OldBills"], Names);
+    }
+
+    [Fact]
+    public void Grep_on_the_database_list_searches_every_database_listed()
+    {
+        Press(Key.CursorLeft); Press(Key.CursorLeft); // databases
+        Press(Key.G.WithCtrl);
+        Type("accountid");
+        PumpUntil(() => !_x.Info.Contains("searching"));
+
+        Assert.Equal(["Sales.dbo.Accounts", "Sales.dbo.Bills", "Sales.dbo.usp_GetBills", "Archive.old.OldBills"], Names);
+        Assert.Contains("grep in 3 databases · 4 matches in 4 objects · ⚠ master: no access", _x.Info);
+
+        for (int n = 0; n < 10 && _x.Selected is not GrepHit { Database: "Archive" }; n++) Press(Key.CursorDown);
+        PumpUntil(() => _described.Contains("Archive.old.OldBills")); // the preview reads it from its own database
+    }
+
+    [Fact]
+    public void Grep_on_a_filtered_database_list_searches_only_those()
+    {
+        Press(Key.CursorLeft); Press(Key.CursorLeft);
+        Press(Key.F.WithCtrl);
+        Type("arch");
+        Press(Key.Enter);
+        Press(Key.G.WithCtrl);
+        Type("accountid");
+        PumpUntil(() => !_x.Info.Contains("searching"));
+
+        Assert.Equal(["old.OldBills"], Names);
+        Assert.Contains("grep in Archive · 1 match in 1 object", _x.Info);
+    }
+
+    [Fact]
+    public void I_on_a_grep_hit_inserts_the_object_it_is_in()
+    {
+        Press(Key.CursorLeft); Press(Key.CursorLeft);
+        Press(Key.G.WithCtrl);
+        Type("accountid");                            // its i goes into the search box
+        PumpUntil(() => !_x.Info.Contains("searching"));
+        Assert.Null(_x.Action);
+
+        Press(Key.Tab);                               // into the results
+        for (int n = 0; n < 10 && _x.Selected is not GrepHit { Database: "Archive" }; n++) Press(Key.CursorDown);
+        Press(new Key('i'));
+
+        Assert.Equal(("old", "OldBills"), (_x.Action?.Object.Schema, _x.Action?.Object.Name));
+        Assert.Equal("Archive", _x.Action?.Database);
+        Assert.Equal(ExplorerVerb.Insert, _x.Action?.Verb);
     }
 
     [Fact]

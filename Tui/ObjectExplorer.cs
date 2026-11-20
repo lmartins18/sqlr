@@ -12,8 +12,8 @@ internal sealed class ExplorerSource
     public required string Database { get; init; }
     public required IReadOnlyList<string> Databases { get; init; }
     public required Func<string, CancellationToken, Task<List<CatalogObject>>> LoadObjects { get; init; }
-    /// <summary>(database, pattern) → definition lines and column names containing the pattern.</summary>
-    public required Func<string, string, CancellationToken, Task<List<GrepHit>>> Grep { get; init; }
+    /// <summary>A database's object names, columns and definitions, for grep.</summary>
+    public required Func<string, CancellationToken, Task<SearchIndex>> LoadSearchIndex { get; init; }
     /// <summary>(database, schema, name) → the F12 description.</summary>
     public required Func<string, string, string, CancellationToken, Task<ObjectDescription?>> Describe { get; init; }
     /// <summary>Object lists already loaded, per database; kept between openings.</summary>
@@ -74,8 +74,14 @@ internal sealed class ObjectExplorer
     private List<object>    _rows = [];  // string (database / schema) | CatalogObject | GrepHit
     private List<GrepHit>   _hits = [];
     private string          _grepPattern = "";
+    private List<string>    _grepDbs = []; // where the grep searches
+    private int             _grepDone;     // databases searched so far
     private bool            _grepping;
     private CancellationTokenSource? _loadCts, _grepCts;
+    private readonly CancellationTokenSource _closing = new();
+    // Loaded on a database's first grep and kept while the explorer is open, so a reopened
+    // explorer sees procs altered in the meantime.
+    private readonly Dictionary<string, Task<SearchIndex>> _indexes = new(StringComparer.OrdinalIgnoreCase);
     private ExplorerAction? _action;
 
     /// <param name="dispatch">Marshals background results onto the UI thread (tests pass a queue).</param>
@@ -157,8 +163,19 @@ internal sealed class ObjectExplorer
         x._loadCts?.Cancel();
         x._grepCts?.Cancel();
         x._previewCts?.Cancel();
+        x._closing.Cancel();
         x.Dialog.Dispose();
         return x._action;
+    }
+
+    /// <summary>A keystroke doesn't cancel a load in progress: the next one needs the same index.</summary>
+    private Task<SearchIndex> IndexFor(string db)
+    {
+        lock (_indexes)
+        {
+            if (_indexes.TryGetValue(db, out var t) && !t.IsFaulted && !t.IsCanceled) return t;
+            return _indexes[db] = Task.Run(() => _src.LoadSearchIndex(db, _closing.Token));
+        }
     }
 
     // ── Data ───────────────────────────────────────────────────────────────
@@ -271,7 +288,7 @@ internal sealed class ObjectExplorer
         string s when _level == Level.Schemas && s == AllSchemas => "(all schemas)",
         string s        => s,
         CatalogObject o => _schema == AllSchemas ? o.FullName : o.Name,
-        GrepHit h       => h.FullName,
+        GrepHit h       => _grepDbs.Count > 1 ? $"{h.Database}.{h.FullName}" : h.FullName,
         _               => ""
     };
 
@@ -298,7 +315,7 @@ internal sealed class ObjectExplorer
                 return $" {name.PadRight(_nameW)}  {o.Kind,-8}  {o.Modified:yyyy-MM-dd HH:mm}";
 
             case GrepHit h:
-                var where = h.IsColumn ? "col" : h.Line.ToString();
+                var where = h.IsColumn ? "col" : h.IsName ? "name" : h.Line.ToString();
                 return $" {name.PadRight(_nameW)}  {h.Kind,-8} {where,5} │ {h.Text.Replace('\t', ' ').Trim()}";
 
             default:
@@ -335,12 +352,15 @@ internal sealed class ObjectExplorer
         string info;
         if (_mode == Mode.Grep)
         {
-            var objects = _hits.Select(h => h.FullName).Distinct().Count();
-            info = _grepping                         ? $" grep in {_db} · searching…"
-                 : _error is not null                ? $" grep in {_db} · ⚠ {_error}"
-                 : _grepPattern.Trim().Length < 2    ? $" grep in {_db} · type at least 2 characters"
-                 : $" grep in {_db} · {_hits.Count:N0} match{(_hits.Count == 1 ? "" : "es")} in {Fmt.Plural(objects, "object")}"
-                   + (_hits.Count >= ObjectCatalog.MaxGrepHits ? $" (first {ObjectCatalog.MaxGrepHits:N0})" : "");
+            var where   = _grepDbs.Count == 1 ? _grepDbs[0] : Fmt.Plural(_grepDbs.Count, "database");
+            var objects = _hits.Select(h => (h.Database, h.FullName)).Distinct().Count();
+            var status  = _grepping ? "searching…" + (_grepDbs.Count > 1 ? $" {_grepDone}/{_grepDbs.Count}" : "")
+                : _grepPattern.Trim().Length < 2 ? "type at least 2 characters"
+                : _error is not null && _hits.Count == 0 ? $"⚠ {_error}"
+                : $"{_hits.Count:N0} match{(_hits.Count == 1 ? "" : "es")} in {Fmt.Plural(objects, "object")}"
+                  + (_hits.Count >= ObjectCatalog.MaxGrepHits ? $" (first {ObjectCatalog.MaxGrepHits:N0})" : "")
+                  + (_error is not null ? $" · ⚠ {_error}" : "");
+            info = $" grep in {where} · {status}";
         }
         else
         {
@@ -361,10 +381,13 @@ internal sealed class ObjectExplorer
         _hint.Text = _mode switch
         {
             Mode.Find => " type to filter · ↑↓ move · Enter done · Esc clear",
-            Mode.Grep => " text in definitions & column names · ↑↓ move · Enter open · Esc back",
-            _ => _level == Level.Objects
-                ? " ← up · → peek · ^F find · ^G grep · t type · s sort · i insert · r top 1000 · F5 top 100 · p preview · ^D/^U scroll"
-                : " ← up · → open · ^F find · ^G grep · p preview · Esc close"
+            Mode.Grep => " text in names, columns & definitions · ↑↓ move · Enter open · Tab then i: insert · Esc back",
+            _ => _level switch
+            {
+                Level.Objects => " ← up · → peek · ^F find · ^G grep · t type · s sort · i insert · r top 1000 · F5 top 100 · p preview · ^D/^U scroll",
+                Level.Schemas => " ← up · → open · ^F find · ^G grep · p preview · Esc close",
+                _             => " → open · ^F find · ^G grep every listed database · p preview · Esc close"
+            }
         };
         Dialog.Title = _mode == Mode.Grep ? " grep " : " objects ";
         Dialog.SetNeedsDraw();
@@ -420,17 +443,16 @@ internal sealed class ObjectExplorer
                 _list.SelectedItem = _rows.Count > 0 ? 0 : -1;
                 break;
             case CatalogObject o:
-                Peek(o.Schema, o.Name, null, null);
+                Peek(_db, o.Schema, o.Name, null, null);
                 break;
             case GrepHit h:
-                Peek(h.Schema, h.Object, h.IsColumn ? null : h.Line, h.IsColumn ? h.Column : _grepPattern);
+                Peek(h.Database, h.Schema, h.Object, h.Line > 0 ? h.Line : null, h.IsColumn ? h.Column : h.IsName ? null : _grepPattern);
                 break;
         }
     }
 
-    private void Peek(string schema, string name, int? line, string? search)
+    private void Peek(string db, string schema, string name, int? line, string? search)
     {
-        var db  = _db;
         var key = ExplorerSource.DescriptionKey(db, schema, name);
         if (_src.Descriptions.TryGetValue(key, out var cached) && cached is not null)
         {
@@ -499,10 +521,14 @@ internal sealed class ObjectExplorer
     {
         _mode  = Mode.Grep;
         _error = null;
-        SetInput(_grepPattern); // Ctrl+G again resumes the last grep
-        Refresh(select: null);
+        SetInput(_grepPattern); // Ctrl+G again resumes the last grep, re-run if you're now somewhere else
+        if (GrepScope().SequenceEqual(_grepDbs, StringComparer.OrdinalIgnoreCase)) Refresh(select: null);
+        else QueueGrep(_grepPattern);
         _input.SetFocus();
     }
+
+    /// <summary>From the database list: every database it shows. Anywhere else: the open database.</summary>
+    private List<string> GrepScope() => _level == Level.Databases ? _src.Databases.Where(d => Matches(d)).ToList() : [_db];
 
     private void LeaveGrep()
     {
@@ -530,10 +556,17 @@ internal sealed class ObjectExplorer
         }
     }
 
+    private const int GrepParallelism = 4;
+
+    /// <summary>
+    /// Greps every database in scope, a few at a time. Hits show as each database finishes, in
+    /// list order; a database that fails is named in the info line and the rest carry on.
+    /// </summary>
     private void QueueGrep(string pattern)
     {
         _grepCts?.Cancel();
         _grepPattern = pattern;
+        _grepDbs     = GrepScope();
         _error       = null;
         if (pattern.Trim().Length < 2)
         {
@@ -543,36 +576,55 @@ internal sealed class ObjectExplorer
             return;
         }
 
-        var cts = _grepCts = new CancellationTokenSource();
-        var db  = _db;
-        _grepping = true;
+        var cts    = _grepCts = new CancellationTokenSource();
+        var dbs    = _grepDbs;
+        var found  = new List<GrepHit>?[dbs.Count];
+        var failed = new List<string>();
+        _grepDone = 0;
+        _grepping = dbs.Count > 0;
+        if (!_grepping)
+        {
+            _hits = [];
+            Refresh();
+            return;
+        }
         UpdateChrome();
         _ = Task.Run(async () =>
         {
             try
             {
                 if (_delay > TimeSpan.Zero) await Task.Delay(_delay, cts.Token); // wait for typing to pause
-                var hits = await _src.Grep(db, pattern, cts.Token);
-                Dispatch(() =>
+                var options = new ParallelOptions { MaxDegreeOfParallelism = GrepParallelism, CancellationToken = cts.Token };
+                await Parallel.ForEachAsync(Enumerable.Range(0, dbs.Count), options, async (i, ct) =>
                 {
-                    if (cts.IsCancellationRequested) return;
-                    _grepping = false;
-                    _hits     = hits;
-                    Refresh(select: null);
+                    var db = dbs[i];
+                    List<GrepHit> hits;
+                    string? failure = null;
+                    try
+                    {
+                        var index = await IndexFor(db).WaitAsync(ct);
+                        hits = index.Grep(pattern, ObjectCatalog.MaxGrepHits, db).Select(h => h with { Database = db }).ToList();
+                    }
+                    catch (Exception ex) when (!ct.IsCancellationRequested)
+                    {
+                        hits    = [];
+                        failure = dbs.Count == 1 ? ex.Message : $"{db}: {ex.Message}";
+                    }
+                    Dispatch(() =>
+                    {
+                        if (cts.IsCancellationRequested) return;
+                        found[i] = hits;
+                        if (failure is not null) failed.Add(failure);
+                        _grepDone++;
+                        _hits  = found.Where(f => f is not null).SelectMany(f => f!).Take(ObjectCatalog.MaxGrepHits).ToList();
+                        _error = failed.Count == 0 ? null : failed[0] + (failed.Count > 1 ? $" (+{failed.Count - 1} more)" : "");
+                        if (_hits.Count >= ObjectCatalog.MaxGrepHits) cts.Cancel(); // enough: stop the databases still running
+                        _grepping = _grepDone < dbs.Count && !cts.IsCancellationRequested;
+                        Refresh(select: null);
+                    });
                 });
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                Dispatch(() =>
-                {
-                    if (cts.IsCancellationRequested) return;
-                    _grepping = false;
-                    _hits     = [];
-                    _error    = ex.Message;
-                    Refresh();
-                });
-            }
         });
     }
 
@@ -595,10 +647,10 @@ internal sealed class ObjectExplorer
         switch (Selected)
         {
             case CatalogObject o:
-                PreviewObject(o.Schema, o.Name);
+                PreviewObject(_db, o.Schema, o.Name);
                 break;
             case GrepHit h:
-                PreviewObject(h.Schema, h.Object);
+                PreviewObject(h.Database, h.Schema, h.Object);
                 break;
             case string s when _level == Level.Schemas:
                 CancelPreviewLoad();
@@ -621,9 +673,8 @@ internal sealed class ObjectExplorer
         _pendingKey = null;
     }
 
-    private void PreviewObject(string schema, string name)
+    private void PreviewObject(string db, string schema, string name)
     {
-        var db  = _db;
         var key = ExplorerSource.DescriptionKey(db, schema, name);
         if (_src.Descriptions.TryGetValue(key, out var cached))
         {
@@ -678,7 +729,7 @@ internal sealed class ObjectExplorer
         {
             GrepHit { IsColumn: true } h => Math.Max(0, Array.FindIndex(text.Split('\n'),
                                                l => l.StartsWith(h.Column + " ", StringComparison.OrdinalIgnoreCase))),
-            GrepHit h when defLine >= 0  => defLine + h.Line - 1,
+            GrepHit h when defLine >= 0 && h.Line > 0 => defLine + h.Line - 1,
             _                            => 0
         };
         SetPreview(key, $" {d.Kind.ToLowerInvariant()} {d.FullName} ", text, target);
@@ -770,7 +821,13 @@ internal sealed class ObjectExplorer
         }
 
         if (kc is KeyCode.CursorRight or KeyCode.Enter || IsChar(k, 'l') || kc == KeyCode.F12) { Open(); return true; }
-        if (_mode == Mode.Grep) return false;
+        if (_mode == Mode.Grep)
+        {
+            // The list has the focus (Tab from the search box): i inserts the object the hit is in
+            if (!IsChar(k, 'i') || Selected is not GrepHit h) return false;
+            Finish(new ExplorerAction(new CatalogObject(h.Schema, h.Object, h.Kind, default), h.Database, ExplorerVerb.Insert));
+            return true;
+        }
 
         if (IsChar(k, 'p')) { TogglePreview(); return true; }
         if (kc is KeyCode.CursorLeft or KeyCode.Backspace || IsChar(k, 'h')) { Up(); return true; }
@@ -799,11 +856,16 @@ internal sealed class ObjectExplorer
                                : null;
             if (verb is null) return false;
             if (verb != ExplorerVerb.Insert && o.Kind is not ("table" or "view")) return true;
-            _action = new ExplorerAction(o, _db, verb.Value);
-            Application.RequestStop(Dialog);
+            Finish(new ExplorerAction(o, _db, verb.Value));
             return true;
         }
         return false;
+    }
+
+    private void Finish(ExplorerAction action)
+    {
+        _action = action;
+        Application.RequestStop(Dialog);
     }
 
     private bool OnInputKey(Key k)

@@ -32,7 +32,7 @@ Most SQL GUIs are slow, heavy, and mouse-driven. `sqlr` gives you:
 | Copy & export | Copy cell / row / all (tab-separated → pastes into Excel); export to CSV, TSV, JSON, Markdown or SQL INSERTs |
 | Peek | `F12` on a table / view / proc / alias: columns, types, PK/FK, defaults, indexes, row count, or the definition — `/` filters the columns or searches the definition (`n` / `N`) |
 | Object explorer | `F4`: databases › schemas › objects (opens on `dbo`), vim-style `h`/`l` navigation, live structure preview, `Ctrl+F` find, filter by type, sort by name / type / modified; insert, `SELECT TOP 1000` into the editor, or peek |
-| Grep | `Ctrl+G` in the explorer: plain-text search through every proc / view / function / trigger definition and column name — "where is this column used?" — opening the definition on the matching line |
+| Grep | `Ctrl+G` in the explorer: plain-text search through object names (`schema.name`), column names and every proc / view / function / trigger definition — "where is this column used?" — in one database or, from the database list, all of them; opening the definition on the matching line |
 | History | `F3`: every query you've run, searchable, with timing and success; reload or re-run |
 | Drafts | The editor text is kept per connection — reconnect and carry on where you left off |
 | Files | `Ctrl+O` / `Ctrl+S` to open and save `.sql` files, or `sqlr -c name file.sql` |
@@ -158,7 +158,7 @@ Databases › schemas › objects; it opens on the current database's `dbo`. The
 | `←` / `h` / `Backspace` | Up a level (objects → schemas → databases) |
 | `→` / `l` / `Enter` | Down a level; on an object, its `F12` view |
 | `Ctrl+F` or `/` | Find: filter the list as you type (`Enter` keeps it, `Esc` clears it) |
-| `Ctrl+G` | Grep: definition lines and column names containing the text (smart case; `Enter` opens the definition on that line) |
+| `Ctrl+G` | Grep: object names (`NimoPricingGroups`, `EDI.NimoPricingGroups` or `CMaster.EDI.NimoPricingGroups`), column names and definition lines containing the text (smart case; `Enter` opens the object, on the matching line for a definition). On the database list it searches every database listed (`Ctrl+F` there first to narrow them). `Tab` moves into the results, where `i` inserts the name of the object a match is in |
 | `t` | Filter by type: all → tables → views → functions → procs |
 | `s` | Sort: name ↑ / ↓ → type ↑ / ↓ → modified ↓ / ↑ |
 | `i` | Insert the name into the editor |

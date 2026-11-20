@@ -786,7 +786,7 @@ public sealed class QueryScreen
         Database    = _database,
         Databases   = _schema.Current.Databases.Count > 0 ? _schema.Current.Databases : [_database],
         LoadObjects = (db, ct) => ObjectCatalog.LoadAsync(_conn.BuildConnectionString(db), ct),
-        Grep        = (db, pattern, ct) => ObjectCatalog.GrepAsync(_conn.BuildConnectionString(db), pattern, ObjectCatalog.MaxGrepHits, ct),
+        LoadSearchIndex = (db, ct) => ObjectCatalog.LoadSearchIndexAsync(_conn.BuildConnectionString(db), ct),
         Describe    = (db, schema, name, ct) => ObjectDescriber.DescribeAsync(_conn.BuildConnectionString(db), schema, name, ct),
         Cache       = _catalogCache,
         Descriptions = _descriptionCache

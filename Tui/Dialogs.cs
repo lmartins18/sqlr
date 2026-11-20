@@ -597,9 +597,10 @@ internal static class Dialogs
         OBJECT EXPLORER (F4)   databases › schemas › objects, opens on dbo; the selection previews on the right
           ←/h  →/l/Enter       Up a level / down a level (on an object: its F12 view)
           Ctrl+F or /          Find: filter the list as you type (Enter keeps it, Esc clears)
-          Ctrl+G               Grep: plain text in every definition + column name (Enter opens the line)
+          Ctrl+G               Grep: plain text in object names, column names and definitions (Enter opens it);
+                               on the database list, in every database listed · Tab then i: insert the object
           t / s                Filter by type / sort (name, type, modified — each ↑ and ↓)
-          i / F5               Insert the name into the editor / SELECT TOP 100
+          i · r · F5           Insert the name · TOP 1000 into the editor and run · TOP 100 into the results
           p · Ctrl+D / Ctrl+U  Hide / show the preview on the right · scroll it
 
         F12 VIEW

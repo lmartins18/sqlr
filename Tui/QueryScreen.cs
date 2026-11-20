@@ -305,9 +305,9 @@ public sealed class QueryScreen
                     AcceptCompletion();
                     return true;
                 case KeyCode.Enter:
-                    // Enter only commits a suggestion you deliberately picked; otherwise it's a
-                    // newline (typing "FROM t o⏎" must not turn the alias into "ON").
-                    if (!_popupChosen)
+                    // Enter accepts like Tab, except where a newline is what you meant: a word you've
+                    // already finished ("desc⏎") and an alias after a table ("FROM t o⏎", not "ON").
+                    if (!_popupChosen && (WordIsComplete() || SqlCompleter.IsAliasPosition(EditorText.TextBeforeCursor(_editor))))
                     {
                         _popup.Hide();
                         return false; // let the TextView insert the newline
@@ -490,6 +490,14 @@ public sealed class QueryScreen
             _editor.CurrentColumn - _editor.LeftColumn - (before.Length - start),
             _editor.CurrentRow - _editor.TopRow));
         _popup.Show(items, anchor, new Size(Application.Screen.Width, Application.Screen.Height - 1));
+    }
+
+    /// <summary>The highlighted suggestion is the word already typed (any case).</summary>
+    private bool WordIsComplete()
+    {
+        var (_, word) = SqlCompleter.CurrentToken(SqlScript.Mask(EditorText.TextBeforeCursor(_editor)));
+        return _popup.Selected is { } c && (c.InsertText.Equals(word, StringComparison.OrdinalIgnoreCase)
+                                            || c.Text.Equals(word, StringComparison.OrdinalIgnoreCase));
     }
 
     private void AcceptCompletion()

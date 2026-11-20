@@ -106,6 +106,23 @@ public sealed class QueryScreenUiTests : IDisposable
     }
 
     [Fact]
+    public void Enter_accepts_the_highlighted_completion_like_Tab()
+    {
+        Type("select * from cust");
+        Press(Key.Enter);
+        Assert.Equal("select * from sales.Customers", Editor.Text);
+        Assert.False(_screen.Popup.IsOpen);
+    }
+
+    [Fact]
+    public void Enter_after_a_finished_keyword_is_a_newline()
+    {
+        Type("select * from sales.Orders o order by o.Total desc");
+        Press(Key.Enter);
+        Assert.Equal("select * from sales.Orders o order by o.Total desc\n", Editor.Text.Replace("\r\n", "\n"));
+    }
+
+    [Fact]
     public void Enter_without_picking_is_a_newline_so_aliases_survive()
     {
         Type("select * from sales.Orders o");

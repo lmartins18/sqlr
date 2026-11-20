@@ -574,8 +574,8 @@ internal static class Dialogs
           F6 / Ctrl+E          Run the block under the cursor (lines between blank lines)
           Esc                  Cancel the running query · close the completion popup
           Ctrl+Space           Show completions
-          Tab                  Accept the highlighted completion
-          ↑↓ then Enter        Pick another completion (Enter alone is always a newline)
+          Tab / Enter          Accept the highlighted completion (↑↓ picks another)
+                               Enter is a newline after a finished word or a table's alias
           Ctrl+/  ·  Alt+/     Toggle -- comment on the line / selected lines
           Ctrl+Backspace       Delete word left   (also Ctrl+W, Alt+Backspace)
           Ctrl+Delete          Delete word right  (also Alt+D)

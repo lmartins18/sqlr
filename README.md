@@ -125,8 +125,7 @@ statement failed, `2` for bad arguments.
 | `F6` / `Ctrl+E` | Run the block under the cursor (lines between blank lines) |
 | `Esc` | Cancel a running query · close the completion popup |
 | `Ctrl+Space` | Show completions |
-| `Tab` (popup) | Accept the highlighted completion |
-| `↑` `↓` then `Enter` (popup) | Pick another completion — `Enter` on its own is always a newline |
+| `Tab` or `Enter` (popup) | Accept the highlighted completion (`↑` `↓` picks another). `Enter` stays a newline after a word you've finished (`desc⏎`) and after a table's alias (`FROM Orders o⏎`) |
 | `Ctrl+/` or `Alt+/` | Toggle `--` comments on the line / selected lines |
 | `Ctrl+Backspace` / `Ctrl+W` / `Alt+Backspace` | Delete word left |
 | `Ctrl+Delete` / `Alt+D` | Delete word right |

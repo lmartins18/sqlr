@@ -216,6 +216,14 @@ public sealed class SqlCompleter
         return (maskedBeforeCursor.Length - w.Length, w);
     }
 
+    /// <summary>The word being typed follows a complete table reference ("FROM t o|"), so it's most likely an alias.</summary>
+    public static bool IsAliasPosition(string textBeforeCursor)
+    {
+        var before = SqlScript.Mask(textBeforeCursor);
+        var (start, _) = CurrentToken(before);
+        return DetectContext(before[..start]) == CompletionContext.AfterTable;
+    }
+
     public static string ExtractCurrentWord(string textBeforeCursor)
     {
         if (string.IsNullOrEmpty(textBeforeCursor)) return "";

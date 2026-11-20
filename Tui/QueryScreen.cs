@@ -35,6 +35,7 @@ public sealed class QueryScreen
     private readonly FrameView       _inputFrame;
     private readonly EditorView      _editor;
     private readonly LineNumberGutter _gutter;
+    private List<ErrorMark> _errorMarks = [];
     private readonly Label           _status;
     private readonly CompletionPopup _popup;
     private readonly Dictionary<string, List<CatalogObject>> _catalogCache = new(StringComparer.OrdinalIgnoreCase);
@@ -103,7 +104,7 @@ public sealed class QueryScreen
         _gutter = new LineNumberGutter(_editor) { X = 0, Y = 0 };
         _editor.X = Pos.Right(_gutter);
         _inputFrame.Add(_editor, _gutter);
-        SqlSyntaxHighlighter.Attach(_editor);
+        SqlSyntaxHighlighter.Attach(_editor, isError: (row, col) => _errorMarks.Exists(m => m.Covers(row, col)));
         _title.NoHotKey();
 
         // ── Status bar ─────────────────────────────────────────────────────
@@ -198,6 +199,7 @@ public sealed class QueryScreen
         _editor.ContentsChanged         += (_, _) =>
         {
             UpdateTitle();
+            SetErrorMarks([]); // an edit can move the text they point at
             // Backspace/Delete are applied by the TextView itself; refresh the list afterwards.
             if (_deletePending)
             {
@@ -574,6 +576,7 @@ public sealed class QueryScreen
         _running    = true;
         _runStarted = DateTime.Now;
         _popup.Hide();
+        SetErrorMarks([]);
         SetStatus("", StatusKind.Busy);
 
         Application.AddTimeout(TimeSpan.FromMilliseconds(120), () =>
@@ -610,6 +613,15 @@ public sealed class QueryScreen
         SetStatus("Cancelling…", StatusKind.Busy);
     }
 
+    /// <summary>Shows where the run failed in the editor, until the next run or edit.</summary>
+    internal void SetErrorMarks(List<ErrorMark> marks)
+    {
+        if (marks.Count == 0 && _errorMarks.Count == 0) return;
+        _errorMarks = marks;
+        _editor.SetNeedsDraw();
+    }
+
+    internal IReadOnlyList<ErrorMark> ErrorMarksShown => _errorMarks;
     internal LineNumberGutter Gutter => _gutter;
 
     private void OnExecuted(string sql, ExecutionResult r)
@@ -617,6 +629,7 @@ public sealed class QueryScreen
         _running = false;
 
         _results.Load(r);
+        SetErrorMarks(r.HasErrors ? ErrorMarks.For(r, _editor.Text ?? "") : []);
 
         try
         {

@@ -285,6 +285,44 @@ public sealed class QueryScreenUiTests : IDisposable
         Assert.Equal(4, _screen.Gutter.Frame.Width);              // "120" plus a space
     }
 
+    [Fact]
+    public void A_failed_run_marks_the_names_its_errors_quote_until_the_next_edit()
+    {
+        Editor.Text = "select o.OrderId,\n       o.Totl\nFORM sales.Orders o";
+        var r = new ExecutionResult();
+        r.Messages.Add(new SqlMessage(MessageKind.Error, "Msg 207, Level 16, State 1, Line 2\nInvalid column name 'Totl'.", 2));
+        r.Messages.Add(new SqlMessage(MessageKind.Error, "Msg 102, Level 15, State 1, Line 3\nIncorrect syntax near 'FORM'.", 3));
+        _screen.SetErrorMarks(ErrorMarks.For(r, Editor.Text));
+        Pump();
+
+        Assert.Equal([new ErrorMark(1, 9, 4), new ErrorMark(2, 0, 4)], _screen.ErrorMarksShown);
+        Assert.Equal("TotlFORM", CellsWithBackground(Theme.Current.Err));
+
+        Editor.SetFocus();
+        Press(Key.End);
+        Type(" ");
+        Assert.Empty(_screen.ErrorMarksShown);
+        Assert.Equal("", CellsWithBackground(Theme.Current.Err));
+    }
+
+    [Fact]
+    public void An_error_naming_nothing_on_its_line_marks_the_whole_line()
+    {
+        var r = new ExecutionResult();
+        r.Messages.Add(new SqlMessage(MessageKind.Error, "Msg 8134, Level 16, State 1, Line 2\nDivide by zero error encountered.", 2));
+        Assert.Equal([new ErrorMark(1, 2, 10)], ErrorMarks.For(r, "select 1\n  select 1/0\n"));
+    }
+
+    private static string CellsWithBackground(Color bg)
+    {
+        var contents = Application.Driver!.Contents!;
+        var sb = new System.Text.StringBuilder();
+        for (int y = 0; y < contents.GetLength(0); y++)
+            for (int x = 0; x < contents.GetLength(1); x++)
+                if (contents[y, x].Attribute?.Background == bg) sb.Append(contents[y, x].Rune);
+        return sb.ToString();
+    }
+
     /// <summary>What a terminal does on paste: every character as a key, back to back.</summary>
     private void PasteKeys(string text)
     {

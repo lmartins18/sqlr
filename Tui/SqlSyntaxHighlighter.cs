@@ -83,7 +83,8 @@ public static class SqlSyntaxHighlighter
     // ── Public attach ──────────────────────────────────────────────────────
 
     /// <param name="search">When given, every match of the term it returns is highlighted (like nvim's hlsearch).</param>
-    public static void Attach(TextView tv, Func<string?>? search = null)
+    /// <param name="isError">(row, col) inside text the last run failed on; shown in the error colour.</param>
+    public static void Attach(TextView tv, Func<string?>? search = null, Func<int, int, bool>? isError = null)
     {
         T[][]    map     = [];
         bool[][] matches = [];
@@ -117,7 +118,9 @@ public static class SqlSyntaxHighlighter
             var cell = e.Line[e.Col];
             cell.Attribute = row < matches.Length && col < matches[row].Length && matches[row][col]
                 ? new TAttr(Theme.Current.HiFg, Theme.Current.Gold)
-                : ColorFor(rowMap[col]);
+                : isError?.Invoke(row, col) == true
+                    ? new TAttr(Theme.Current.HiFg, Theme.Current.Err)
+                    : ColorFor(rowMap[col]);
             e.Line[e.Col]  = cell;
         };
     }

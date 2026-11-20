@@ -251,6 +251,23 @@ public sealed class QueryScreenUiTests : IDisposable
         Assert.False(_screen.IsRunning);
     }
 
+    [Fact]
+    public void Line_numbers_follow_the_editor_and_widen_past_99_lines()
+    {
+        Editor.Text = string.Join("\n", Enumerable.Range(1, 40).Select(i => $"select {i}"));
+        EditorText.MoveCursor(Editor, 34, 0);                    // line 35, scrolled into view
+        Pump();
+
+        var numbers = _screen.Gutter.VisibleNumbers();
+        Assert.Equal((Editor.TopRow + 1).ToString(), numbers[0]);
+        Assert.Contains("35", numbers);
+        Assert.Equal(_screen.Gutter.Frame.Width, Editor.Frame.X);
+
+        Editor.Text = string.Join("\n", Enumerable.Range(1, 120).Select(i => $"select {i}"));
+        Pump();
+        Assert.Equal(4, _screen.Gutter.Frame.Width);              // "120" plus a space
+    }
+
     /// <summary>What a terminal does on paste: every character as a key, back to back.</summary>
     private void PasteKeys(string text)
     {

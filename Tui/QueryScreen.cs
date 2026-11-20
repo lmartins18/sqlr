@@ -34,6 +34,7 @@ public sealed class QueryScreen
     private readonly ResultsPane     _results;
     private readonly FrameView       _inputFrame;
     private readonly EditorView      _editor;
+    private readonly LineNumberGutter _gutter;
     private readonly Label           _status;
     private readonly CompletionPopup _popup;
     private readonly Dictionary<string, List<CatalogObject>> _catalogCache = new(StringComparer.OrdinalIgnoreCase);
@@ -99,7 +100,9 @@ public sealed class QueryScreen
             AllowsTab   = false,   // Tab switches panes / accepts completions
             Text        = initialText ?? ""
         };
-        _inputFrame.Add(_editor);
+        _gutter = new LineNumberGutter(_editor) { X = 0, Y = 0 };
+        _editor.X = Pos.Right(_gutter);
+        _inputFrame.Add(_editor, _gutter);
         SqlSyntaxHighlighter.Attach(_editor);
         _title.NoHotKey();
 
@@ -598,6 +601,8 @@ public sealed class QueryScreen
         _cts?.Cancel();
         SetStatus("Cancelling…", StatusKind.Busy);
     }
+
+    internal LineNumberGutter Gutter => _gutter;
 
     private void OnExecuted(string sql, ExecutionResult r)
     {

@@ -22,7 +22,7 @@ internal sealed class CompletionPopup
     {
         _frame = new FrameView
         {
-            Title       = " Tab accept · Esc ",
+            Title       = " Tab/Enter accept · Esc ",
             X           = 1,
             Y           = 2,
             Width       = 58,

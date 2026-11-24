@@ -49,9 +49,10 @@ internal sealed class EditorView : TextView
     // ── Terminal paste ─────────────────────────────────────────────────────
     // Terminals paste by sending the text as keystrokes, and Terminal.Gui 2.0 has no bracketed
     // paste. Typed one by one (completion, redraw) a long script takes minutes, and its tabs would
-    // move the focus. Keys that arrive with no pause before them are collected and inserted together.
+    // move the focus. So typed keys wait for the next main-loop pass: a paste's keys all arrive in
+    // that pass and go in together (first one included, so one undo takes it all back); a key on
+    // its own is handled exactly as if typed.
 
-    private static readonly TimeSpan BurstGap = TimeSpan.FromMilliseconds(10);  // queued, not typed
     private static readonly TimeSpan PasteGap = TimeSpan.FromMilliseconds(250); // a paste carrying on after a redraw
     private const int PasteMinKeys = 32;
 
@@ -88,12 +89,8 @@ internal sealed class EditorView : TextView
             _pasting = false;
             return false;
         }
-        var idle = _lastKeyDone == 0 ? TimeSpan.MaxValue : Stopwatch.GetElapsedTime(_lastKeyDone);
-        if (_burst.Count == 0 && idle >= BurstGap && !(_pasting && idle < PasteGap))
-        {
+        if (_burst.Count == 0 && _pasting && (_lastKeyDone == 0 || Stopwatch.GetElapsedTime(_lastKeyDone) >= PasteGap))
             _pasting = false;
-            return false;
-        }
         // A Tab right after typed letters accepts a completion; only inside a pasted block is it text.
         if (ch == '\t' && !_pasting && !_burst.Exists(k => k.KeyCode == KeyCode.Enter)) return false;
 

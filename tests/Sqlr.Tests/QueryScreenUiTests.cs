@@ -343,7 +343,7 @@ public sealed class QueryScreenUiTests : IDisposable
         Assert.False(_screen.Popup.IsOpen);
 
         Press(Key.Z.WithCtrl);
-        Assert.DoesNotContain("\n", Editor.Text);                 // the block goes in one step
+        Assert.Equal("", Editor.Text);                             // all of it, first character included
     }
 
     [Fact]
